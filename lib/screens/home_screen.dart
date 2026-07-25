@@ -4,10 +4,10 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../services/tmdb_service.dart';
 import '../services/database_service.dart';
+import 'filtered_results_screen.dart';
 import '../theme/app_theme.dart';
 import '../widgets/glass_card.dart';
 import '../widgets/shimmer_loading.dart';
-import '../widgets/ad_banner.dart';
 import 'details_screen.dart';
 import 'see_all_screen.dart';
 import 'upcoming_releases_screen.dart';
@@ -162,8 +162,16 @@ class _HomeScreenState extends State<HomeScreen> {
               _buildContinueWatchingSection(context, dbService),
 
               const SizedBox(height: 16),
-              if (!dbService.isPremium) const AdBanner(),
-              const SizedBox(height: 16),
+
+              // Genres Row
+              _buildGenresRow(context),
+
+              const SizedBox(height: 12),
+
+              // Years Row
+              _buildYearsRow(context),
+
+              const SizedBox(height: 24),
 
               // 3. Dynamic Section Navigation Chips
               _buildNavigationPills(context),
@@ -186,8 +194,6 @@ class _HomeScreenState extends State<HomeScreen> {
                   ? ShimmerLoadingPresets.horizontalPostersSkeleton()
                   : _buildHorizontalSection(context, items: tmdbService.movies),
 
-              const SizedBox(height: 24),
-              if (!dbService.isPremium) const AdBanner(),
               const SizedBox(height: 24),
 
               // 6. TV Series Section
@@ -230,7 +236,6 @@ class _HomeScreenState extends State<HomeScreen> {
                   : _buildHorizontalSection(context, items: tmdbService.netflix),
 
               const SizedBox(height: 24),
-              if (!dbService.isPremium) const AdBanner(),
 
               // 9. Amazon Prime Section
               _buildPlatformSectionTitle(context, 'Streaming on Prime Video', Colors.lightBlueAccent, key: _primeKey, items: tmdbService.prime),
@@ -364,7 +369,6 @@ class _HomeScreenState extends State<HomeScreen> {
               const SizedBox(height: 30),
 
               // 16. Premium sponsor promotional banner
-              if (!dbService.isPremium) const AdBanner(),
 
               const SizedBox(height: 110),
             ],
@@ -430,69 +434,80 @@ class _HomeScreenState extends State<HomeScreen> {
               final progress = item['progress_seconds'] as int? ?? 0;
               final duration = item['duration_seconds'] as int? ?? 0;
               final double percent = duration > 0 ? (progress / duration).clamp(0.0, 1.0) : 0.0;
+              final int remaining = duration > progress ? duration - progress : 0;
+              final String remainingLabel = remaining > 0
+                  ? '${(remaining / 60).floor()}m left'
+                  : percent > 0 ? 'Watched' : 'Start';
 
-              return GestureDetector(
-                onTap: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (context) => DetailsScreen(
-                        id: item['id'],
-                        mediaType: item['media_type'] ?? 'movie',
-                      ),
-                    ),
-                  );
-                },
-                child: Container(
-                  width: 200,
-                  margin: const EdgeInsets.symmetric(horizontal: 8),
-                  child: ClipRRect(
-                    borderRadius: BorderRadius.circular(12),
-                    child: Stack(
-                      fit: StackFit.expand,
-                      children: [
-                        // Glass backdrop cover
-                        Image.network(
-                          imageUrl,
-                          fit: BoxFit.cover,
+              return Dismissible(
+                key: Key('continue_${item['id']}'),
+                direction: DismissDirection.up,
+                onDismissed: (_) => dbService.removeFromHistory(item['id']),
+                child: GestureDetector(
+                  onTap: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) => DetailsScreen(
+                          id: item['id'],
+                          mediaType: item['media_type'] ?? 'movie',
                         ),
-                        Container(
-                          decoration: const BoxDecoration(
-                            gradient: LinearGradient(
-                              colors: [Colors.black54, Colors.black87],
-                              begin: Alignment.topCenter,
-                              end: Alignment.bottomCenter,
+                      ),
+                    );
+                  },
+                  child: Container(
+                    width: 210,
+                    margin: const EdgeInsets.symmetric(horizontal: 6),
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(14),
+                      boxShadow: [BoxShadow(color: Colors.black54, blurRadius: 8, offset: const Offset(0, 4))],
+                    ),
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(14),
+                      child: Stack(
+                        fit: StackFit.expand,
+                        children: [
+                          Image.network(imageUrl, fit: BoxFit.cover,
+                            errorBuilder: (_, __, ___) => Container(color: AppTheme.surface)),
+                          Container(
+                            decoration: const BoxDecoration(
+                              gradient: LinearGradient(
+                                colors: [Colors.transparent, Colors.black87],
+                                begin: Alignment.topCenter, end: Alignment.bottomCenter,
+                                stops: [0.3, 1.0],
+                              ),
                             ),
                           ),
-                        ),
-                        const Center(
-                          child: Icon(Icons.play_circle_outline_rounded, color: Colors.white, size: 36),
-                        ),
-                        Positioned(
-                          bottom: 12,
-                          left: 10,
-                          right: 10,
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                name,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white, fontSize: 12),
-                              ),
-                              Text(
-                                episodeLabel,
-                                style: const TextStyle(color: AppTheme.accent, fontSize: 10, fontWeight: FontWeight.bold),
-                              ),
-                            ],
-                          ),
-                        ),
-                        if (percent > 0.0)
+                          // Play button
+                          const Center(child: Icon(Icons.play_circle_fill_rounded, color: Colors.white, size: 40)),
+                          // Info bar at bottom
                           Positioned(
-                            bottom: 0,
-                            left: 0,
-                            right: 0,
+                            bottom: percent > 0 ? 6 : 12,
+                            left: 10, right: 10,
+                            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                              Text(name, maxLines: 1, overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white, fontSize: 12)),
+                              Row(
+                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                children: [
+                                  Text(episodeLabel,
+                                    style: const TextStyle(color: AppTheme.accent, fontSize: 10, fontWeight: FontWeight.bold)),
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                    decoration: BoxDecoration(
+                                      color: Colors.black54,
+                                      borderRadius: BorderRadius.circular(8),
+                                    ),
+                                    child: Text(remainingLabel,
+                                      style: const TextStyle(color: Colors.white70, fontSize: 9, fontWeight: FontWeight.w600)),
+                                  ),
+                                ],
+                              ),
+                            ]),
+                          ),
+                          // Progress bar
+                          Positioned(
+                            bottom: 0, left: 0, right: 0,
                             child: LinearProgressIndicator(
                               value: percent,
                               backgroundColor: Colors.white24,
@@ -500,7 +515,8 @@ class _HomeScreenState extends State<HomeScreen> {
                               minHeight: 4,
                             ),
                           ),
-                      ],
+                        ],
+                      ),
                     ),
                   ),
                 ),
@@ -1463,6 +1479,105 @@ class _HomeScreenState extends State<HomeScreen> {
           letterSpacing: 1.4,
         ),
       ),
+    );
+  }
+
+  Widget _buildGenresRow(BuildContext context) {
+    final genres = [
+      {'id': '28', 'name': 'Action', 'icon': Icons.flash_on},
+      {'id': '35', 'name': 'Comedy', 'icon': Icons.sentiment_very_satisfied},
+      {'id': '27', 'name': 'Horror', 'icon': Icons.nights_stay},
+      {'id': '878', 'name': 'Sci-Fi', 'icon': Icons.rocket_launch},
+      {'id': '10749', 'name': 'Romance', 'icon': Icons.favorite},
+      {'id': '16', 'name': 'Animation', 'icon': Icons.animation},
+    ];
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Padding(
+          padding: EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+          child: Text('Browse by Genre', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: Colors.white70)),
+        ),
+        SizedBox(
+          height: 40,
+          child: ListView.builder(
+            scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            itemCount: genres.length,
+            itemBuilder: (context, index) {
+              final g = genres[index];
+              return GestureDetector(
+                onTap: () {
+                  Navigator.push(context, MaterialPageRoute(
+                    builder: (_) => FilteredResultsScreen(title: g['name'] as String, genreId: g['id'] as String),
+                  ));
+                },
+                child: Container(
+                  margin: const EdgeInsets.only(right: 12),
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: AppTheme.surface,
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(color: Colors.white10),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(g['icon'] as IconData, color: AppTheme.accent, size: 16),
+                      const SizedBox(width: 8),
+                      Text(g['name'] as String, style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w500)),
+                    ],
+                  ),
+                ),
+              );
+            },
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildYearsRow(BuildContext context) {
+    final years = ['2024', '2023', '2022', '2020s', '2010s', '2000s'];
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Padding(
+          padding: EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+          child: Text('Release Year', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: Colors.white70)),
+        ),
+        SizedBox(
+          height: 36,
+          child: ListView.builder(
+            scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            itemCount: years.length,
+            itemBuilder: (context, index) {
+              final y = years[index];
+              return GestureDetector(
+                onTap: () {
+                  Navigator.push(context, MaterialPageRoute(
+                    builder: (_) => FilteredResultsScreen(title: y, year: y),
+                  ));
+                },
+                child: Container(
+                  margin: const EdgeInsets.only(right: 10),
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withOpacity(0.05),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Center(
+                    child: Text(y, style: const TextStyle(color: Colors.white70, fontSize: 13, fontWeight: FontWeight.w500)),
+                  ),
+                ),
+              );
+            },
+          ),
+        ),
+      ],
     );
   }
 

@@ -3,7 +3,6 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../services/tmdb_service.dart';
 import '../theme/app_theme.dart';
-import '../widgets/ad_banner.dart';
 import '../widgets/shimmer_loading.dart';
 import '../widgets/glass_card.dart';
 import 'details_screen.dart';
@@ -18,7 +17,7 @@ class SearchScreen extends StatefulWidget {
 class _SearchScreenState extends State<SearchScreen> {
   final TextEditingController _searchController = TextEditingController();
   Timer? _debounceTimer;
-  final List<String> _categories = ['All', 'Action', 'Comedy', 'Sci-Fi', 'Horror', 'Upcoming'];
+  final List<String> _categories = ['All', 'Action', 'Drama', 'Comedy', 'Sci-Fi', 'Horror', 'Anime', 'Upcoming'];
   String _selectedCategory = 'All';
 
   final List<String> _recentSearches = [
@@ -75,10 +74,12 @@ class _SearchScreenState extends State<SearchScreen> {
       if (_selectedCategory != 'All') {
         int targetGenre = -1;
         if (_selectedCategory == 'Action') targetGenre = 28;
+        if (_selectedCategory == 'Drama') targetGenre = 18;
         if (_selectedCategory == 'Comedy') targetGenre = 35;
         if (_selectedCategory == 'Sci-Fi') targetGenre = 878;
         if (_selectedCategory == 'Horror') targetGenre = 27;
         
+      if (_selectedCategory == 'Anime') targetGenre = 16;
         if (targetGenre != -1) {
           baseList = baseList.where((item) {
             final genres = item['genre_ids'] as List<dynamic>? ?? [];
@@ -182,9 +183,19 @@ class _SearchScreenState extends State<SearchScreen> {
 
             // Recent Searches (Visible only when search input is empty)
             if (_searchController.text.isEmpty) ...[
-              const Text(
-                'RECENT SEARCHES',
-                style: TextStyle(color: AppTheme.textSecondary, fontSize: 11, fontWeight: FontWeight.bold, letterSpacing: 1.2),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  const Text(
+                    'RECENT SEARCHES',
+                    style: TextStyle(color: AppTheme.textSecondary, fontSize: 11, fontWeight: FontWeight.bold, letterSpacing: 1.2),
+                  ),
+                  GestureDetector(
+                    onTap: () => setState(() => _recentSearches.clear()),
+                    child: const Text('Clear All',
+                      style: TextStyle(color: AppTheme.accent, fontSize: 12, fontWeight: FontWeight.w600)),
+                  ),
+                ],
               ),
               const SizedBox(height: 10),
               Wrap(
@@ -358,7 +369,6 @@ class _SearchScreenState extends State<SearchScreen> {
                           },
                         ),
             ),
-            const AdBanner(),
             const SizedBox(height: 100), // clearance for floating bottom dock
           ],
         ),

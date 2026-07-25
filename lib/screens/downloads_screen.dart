@@ -3,7 +3,7 @@ import 'package:provider/provider.dart';
 import '../services/database_service.dart';
 import '../theme/app_theme.dart';
 import '../widgets/glass_card.dart';
-import 'stream_player_screen.dart';
+import 'native_stream_player_screen.dart';
 
 class DownloadsScreen extends StatelessWidget {
   const DownloadsScreen({super.key});
@@ -82,14 +82,14 @@ class DownloadsScreen extends StatelessWidget {
                         Navigator.push(
                           context,
                           MaterialPageRoute(
-                            builder: (context) => StreamPlayerScreen(
+                            builder: (context) => NativeStreamPlayerScreen(
                               id: item['id'] as int,
                               title: title,
                               mediaType: mediaType,
+                              season: 1,
+                              episode: 1,
                               seasons: item['seasons'] as List<dynamic>? ?? const [],
                               isOffline: true,
-                              downloadQuality: item['download_quality'] as String?,
-                              downloadLanguage: item['download_language'] as String?,
                             ),
                           ),
                         );

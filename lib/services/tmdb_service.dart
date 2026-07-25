@@ -380,7 +380,7 @@ class TMDBService extends ChangeNotifier {
 
     try {
       final response = await http.get(Uri.parse(
-        '$_baseUrl/$mediaType/$id?api_key=${AppConfig.tmdbApiKey}&append_to_response=videos,watch/providers'
+        '$_baseUrl/$mediaType/$id?api_key=${AppConfig.tmdbApiKey}&append_to_response=videos,watch/providers,credits'
       )).timeout(const Duration(seconds: 15));
 
       if (response.statusCode == 200) {
@@ -415,6 +415,10 @@ class TMDBService extends ChangeNotifier {
       orElse: () => videos.isNotEmpty ? videos.first : null,
     );
 
+    final creditsWrapper = data['credits'];
+    final List<dynamic> castList = 
+        (creditsWrapper is Map<String, dynamic>) ? (creditsWrapper['cast'] ?? []) : [];
+
     double voteAverage = 0.0;
     if (data['vote_average'] is num) {
       voteAverage = (data['vote_average'] as num).toDouble();
@@ -431,6 +435,7 @@ class TMDBService extends ChangeNotifier {
       'genres': (data['genres'] as List<dynamic>?)?.map((g) => g['name'].toString()).toList() ?? [],
       'seasons': data['seasons'] ?? [],
       'trailer_id': trailerVideo != null ? trailerVideo['key'] : null,
+      'cast': castList,
       'free_options': [...freeProviders, ...adsProviders].map((p) => {
         'provider_name': p['provider_name'],
         'logo_path': imageBaseUrl + p['logo_path'],

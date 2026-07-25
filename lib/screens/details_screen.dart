@@ -1,6 +1,7 @@
 import 'dart:ui';
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
@@ -10,7 +11,7 @@ import '../services/download_service.dart';
 import '../theme/app_theme.dart';
 import '../widgets/glass_card.dart';
 import '../widgets/shimmer_loading.dart';
-import 'stream_player_screen.dart';
+import 'native_stream_player_screen.dart';
 
 class DetailsScreen extends StatefulWidget {
   final int id;
@@ -169,6 +170,7 @@ class _DetailsScreenState extends State<DetailsScreen> {
     final freeOptions = details['free_options'] as List<dynamic>;
     final subOptions = details['subscription_options'] as List<dynamic>;
     final genresList = details['genres'] as List<dynamic>? ?? [];
+    final castList = details['cast'] as List<dynamic>? ?? [];
 
     final backdropPath = details['backdrop_path'];
     final backdropUrl = backdropPath ?? 'https://images.unsplash.com/photo-1536440136628-849c177e76a1?w=800';
@@ -178,28 +180,27 @@ class _DetailsScreenState extends State<DetailsScreen> {
       backgroundColor: AppTheme.background,
       body: Stack(
         children: [
-          // 1. Dynamic Blurred Backdrop Canvas
+          // 1. Static Backdrop Image with Gradient (Removed heavy BackdropFilter for performance)
           Positioned.fill(
             child: Container(
               decoration: BoxDecoration(
                 image: DecorationImage(
                   image: NetworkImage(backdropUrl),
                   fit: BoxFit.cover,
+                  colorFilter: ColorFilter.mode(Colors.black.withOpacity(0.5), BlendMode.darken),
                 ),
               ),
-              child: BackdropFilter(
-                filter: ImageFilter.blur(sigmaX: 25, sigmaY: 25),
-                child: Container(
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      colors: [
-                        Colors.black.withOpacity(0.4),
-                        AppTheme.background.withOpacity(0.8),
-                        AppTheme.background,
-                      ],
-                      begin: Alignment.topCenter,
-                      end: Alignment.bottomCenter,
-                    ),
+              child: Container(
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    colors: [
+                      Colors.black.withOpacity(0.4),
+                      AppTheme.background.withOpacity(0.9),
+                      AppTheme.background,
+                    ],
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    stops: const [0.0, 0.4, 1.0],
                   ),
                 ),
               ),
@@ -215,35 +216,30 @@ class _DetailsScreenState extends State<DetailsScreen> {
                 children: [
                   _buildCustomAppBar(context, details),
 
-                  // 3. YouTube Direct iframe Video Player Webview (Auto-pauses when screen is pushed underneath player)
-                  if (trailerId != null && (ModalRoute.of(context)?.isCurrent ?? true))
-                    Container(
-                      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                      height: 210,
-                      decoration: BoxDecoration(
-                        borderRadius: BorderRadius.circular(16),
-                        border: Border.all(color: Colors.white10),
-                        boxShadow: const [BoxShadow(color: Colors.black54, blurRadius: 15, offset: Offset(0, 5))],
-                      ),
-                      child: ClipRRect(
-                        borderRadius: BorderRadius.circular(15),
-                        child: InAppWebView(
-                          key: _trailerKey,
-                          initialUrlRequest: URLRequest(
-                            url: Uri.parse('https://www.youtube-nocookie.com/embed/$trailerId?autoplay=1&mute=1&playsinline=1&rel=0'),
+                  // 3. YouTube Trailer Thumbnail (Replaced heavy Webview for 60fps scrolling)
+                  if (trailerId != null)
+                    GestureDetector(
+                      onTap: () async {
+                        final url = Uri.parse('https://www.youtube.com/watch?v=$trailerId');
+                        if (await canLaunchUrl(url)) await launchUrl(url, mode: LaunchMode.externalApplication);
+                      },
+                      child: Container(
+                        margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                        height: 210,
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(16),
+                          border: Border.all(color: Colors.white10),
+                          boxShadow: const [BoxShadow(color: Colors.black54, blurRadius: 15, offset: Offset(0, 5))],
+                          image: DecorationImage(
+                            image: NetworkImage('https://img.youtube.com/vi/$trailerId/hqdefault.jpg'),
+                            fit: BoxFit.cover,
                           ),
-                          initialOptions: InAppWebViewGroupOptions(
-                            crossPlatform: InAppWebViewOptions(
-                              mediaPlaybackRequiresUserGesture: false,
-                              transparentBackground: true,
-                              javaScriptEnabled: true,
-                              userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                              cacheEnabled: true,
-                            ),
-                            android: AndroidInAppWebViewOptions(
-                              useHybridComposition: true,
-                              domStorageEnabled: true,
-                            ),
+                        ),
+                        child: Center(
+                          child: Container(
+                            width: 60, height: 60,
+                            decoration: BoxDecoration(color: Colors.black54, shape: BoxShape.circle),
+                            child: const Icon(Icons.play_arrow, color: Colors.white, size: 36),
                           ),
                         ),
                       ),
@@ -276,7 +272,7 @@ class _DetailsScreenState extends State<DetailsScreen> {
                                   fit: BoxFit.cover,
                                   loadingBuilder: (context, child, loadingProgress) {
                                     if (loadingProgress == null) return child;
-                                    return const ImageShimmerPlaceholder(borderRadius: 12);
+                                    return Container(color: AppTheme.surface);
                                   },
                                   errorBuilder: (context, error, stackTrace) => Container(
                                     color: AppTheme.surface,
@@ -409,6 +405,84 @@ class _DetailsScreenState extends State<DetailsScreen> {
                           ),
                         ),
 
+                        const SizedBox(height: 24),
+
+                        if (castList.isNotEmpty) ...[
+                          const Text(
+                            'Cast & Crew',
+                            style: TextStyle(
+                              fontSize: 18,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.white,
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+                          SizedBox(
+                            height: 140,
+                            child: ListView.builder(
+                              scrollDirection: Axis.horizontal,
+                              itemCount: castList.length > 20 ? 20 : castList.length,
+                              itemBuilder: (context, index) {
+                                final cast = castList[index];
+                                final name = cast['name'] ?? 'Unknown';
+                                final character = cast['character'] ?? '';
+                                final profilePath = cast['profile_path'];
+                                final imageUrl = profilePath != null 
+                                    ? 'https://image.tmdb.org/t/p/w200$profilePath'
+                                    : 'https://ui-avatars.com/api/?name=${Uri.encodeComponent(name)}&background=333333&color=ffffff';
+
+                                return Container(
+                                  width: 90,
+                                  margin: const EdgeInsets.only(right: 12),
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.center,
+                                    children: [
+                                      ClipRRect(
+                                        borderRadius: BorderRadius.circular(45),
+                                        child: Image.network(
+                                          imageUrl,
+                                          width: 70,
+                                          height: 70,
+                                          fit: BoxFit.cover,
+                                          errorBuilder: (_, __, ___) => Container(
+                                            width: 70,
+                                            height: 70,
+                                            color: AppTheme.surface,
+                                            child: const Icon(Icons.person, color: Colors.white24),
+                                          ),
+                                        ),
+                                      ),
+                                      const SizedBox(height: 8),
+                                      Text(
+                                        name,
+                                        textAlign: TextAlign.center,
+                                        maxLines: 2,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: const TextStyle(
+                                          color: Colors.white,
+                                          fontSize: 12,
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                      ),
+                                      const SizedBox(height: 2),
+                                      Text(
+                                        character,
+                                        textAlign: TextAlign.center,
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: const TextStyle(
+                                          color: AppTheme.textSecondary,
+                                          fontSize: 10,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                );
+                              },
+                            ),
+                          ),
+                        ],
+
                         const SizedBox(height: 40),
                       ],
                     ),
@@ -425,6 +499,8 @@ class _DetailsScreenState extends State<DetailsScreen> {
   Widget _buildWatchStreamButton(BuildContext context, Map<String, dynamic> details) {
     final title = details['title'] ?? details['name'] ?? 'Untitled';
     final isTv = widget.mediaType == 'tv';
+    final db = Provider.of<DatabaseService>(context);
+    final inWatchlist = db.isInWatchlist(widget.id);
 
     return Container(
       width: double.infinity,
@@ -432,49 +508,104 @@ class _DetailsScreenState extends State<DetailsScreen> {
       child: Column(
         children: [
           if (isTv) _buildTvSelector(details),
-          ElevatedButton.icon(
-            onPressed: () {
-              // Record playback to Continue Watching history list
-              Provider.of<DatabaseService>(context, listen: false).addToHistory(
-                details,
-                season: widget.mediaType == 'tv' ? _selectedSeason : null,
-                episode: widget.mediaType == 'tv' ? _selectedEpisode : null,
-              );
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (context) => StreamPlayerScreen(
-                    id: widget.id,
-                    title: title,
-                    mediaType: widget.mediaType,
-                    season: _selectedSeason,
-                    episode: _selectedEpisode,
-                    seasons: details['seasons'] as List<dynamic>? ?? [],
-                  ),
-                ),
-              );
-            },
-            icon: const Icon(Icons.play_arrow_rounded, color: Colors.black, size: 28),
-            label: Text(
-              isTv 
-                  ? 'Watch Season $_selectedSeason, Ep $_selectedEpisode Free'
-                  : 'Watch Full Movie Free',
-              style: const TextStyle(
-                color: Colors.black,
-                fontWeight: FontWeight.bold,
-                fontSize: 15,
+
+          // Main Watch Button
+          Container(
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(16),
+              gradient: const LinearGradient(
+                colors: [Color(0xFF6C63FF), Color(0xFF8B5CF6)],
+                begin: Alignment.centerLeft, end: Alignment.centerRight,
               ),
+              boxShadow: [BoxShadow(color: const Color(0xFF6C63FF).withOpacity(0.4), blurRadius: 16, offset: const Offset(0, 8))],
             ),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: AppTheme.accent,
-              padding: const EdgeInsets.symmetric(vertical: 14),
-              minimumSize: const Size(double.infinity, 52),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
+            child: ElevatedButton.icon(
+              onPressed: () {
+                HapticFeedback.mediumImpact();
+                Provider.of<DatabaseService>(context, listen: false).addToHistory(
+                  details,
+                  season: widget.mediaType == 'tv' ? _selectedSeason : null,
+                  episode: widget.mediaType == 'tv' ? _selectedEpisode : null,
+                );
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => NativeStreamPlayerScreen(
+                      id: widget.id,
+                      title: title,
+                      mediaType: widget.mediaType,
+                      season: _selectedSeason,
+                      episode: _selectedEpisode,
+                      seasons: details['seasons'] as List<dynamic>? ?? [],
+                    ),
+                  ),
+                );
+              },
+              icon: const Icon(Icons.play_arrow_rounded, color: Colors.white, size: 28),
+              label: Text(
+                isTv
+                    ? 'Watch S$_selectedSeason E$_selectedEpisode Free'
+                    : '▶  Watch Full Movie Free',
+                style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 15),
               ),
-              elevation: 4,
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.transparent,
+                shadowColor: Colors.transparent,
+                padding: const EdgeInsets.symmetric(vertical: 16),
+                minimumSize: const Size(double.infinity, 56),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+              ),
             ),
           ),
+
+          const SizedBox(height: 12),
+
+          // Secondary row: Watchlist + Download
+          Row(children: [
+            // ❤️ Watchlist button
+            Expanded(
+              child: GestureDetector(
+                onTap: () {
+                  HapticFeedback.lightImpact();
+                  if (inWatchlist) {
+                    db.removeFromWatchlist(widget.id);
+                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                      content: Text('Removed from Watchlist'),
+                      backgroundColor: Colors.black87,
+                      duration: Duration(seconds: 1),
+                      behavior: SnackBarBehavior.floating,
+                    ));
+                  } else {
+                    db.addToWatchlist(details);
+                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                      content: Text('❤️ Added to Watchlist!'),
+                      backgroundColor: Color(0xFF6C63FF),
+                      duration: Duration(seconds: 1),
+                      behavior: SnackBarBehavior.floating,
+                    ));
+                  }
+                },
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 250),
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                  decoration: BoxDecoration(
+                    color: inWatchlist ? const Color(0xFF6C63FF).withOpacity(0.2) : Colors.white.withOpacity(0.06),
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(color: inWatchlist ? const Color(0xFF6C63FF) : Colors.white24),
+                  ),
+                  child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+                    Icon(inWatchlist ? Icons.favorite_rounded : Icons.favorite_border_rounded,
+                        color: inWatchlist ? const Color(0xFF6C63FF) : Colors.white70, size: 20),
+                    const SizedBox(width: 8),
+                    Text(inWatchlist ? 'In Watchlist' : '+ Watchlist',
+                        style: TextStyle(
+                          color: inWatchlist ? const Color(0xFF6C63FF) : Colors.white70,
+                          fontWeight: FontWeight.bold, fontSize: 13)),
+                  ]),
+                ),
+              ),
+            ),
+          ]),
         ],
       ),
     );
@@ -683,7 +814,7 @@ class _DetailsScreenState extends State<DetailsScreen> {
               fit: BoxFit.cover,
               loadingBuilder: (context, child, loadingProgress) {
                 if (loadingProgress == null) return child;
-                return const ImageShimmerPlaceholder(borderRadius: 16);
+                return Container(color: AppTheme.surface);
               },
               errorBuilder: (context, error, stackTrace) => Container(
                 color: AppTheme.surface,

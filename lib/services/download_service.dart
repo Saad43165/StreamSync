@@ -3,11 +3,11 @@ import 'package:flutter/material.dart';
 import 'package:dio/dio.dart';
 import 'package:path_provider/path_provider.dart';
 import 'database_service.dart';
+import 'stream_resolver_service.dart';
 
 class DownloadService extends ChangeNotifier {
   final DatabaseService dbService;
-  
-  // Track active downloads by media ID
+
   final Map<int, double> _activeProgress = {};
   final Map<int, String> _activeStatus = {};
   final Map<int, CancelToken> _cancelTokens = {};
@@ -27,36 +27,78 @@ class DownloadService extends ChangeNotifier {
     required String selectedLanguage,
   }) async {
     final id = details['id'] as int;
-    
-    if (isDownloading(id)) return; // Already downloading
+    if (isDownloading(id)) return;
+
+    final title = details['title'] ?? details['name'] ?? 'Unknown';
+    final mediaType = details['media_type'] as String? ?? 'movie';
 
     _activeProgress[id] = 0.01;
-    _activeStatus[id] = 'Initiating connection...';
+    _activeStatus[id] = 'Resolving stream...';
     _activeDetails[id] = Map<String, dynamic>.from(details);
     _cancelTokens[id] = CancelToken();
     notifyListeners();
 
     try {
-      final appDocDir = await getApplicationDocumentsDirectory();
-      final downloadsDir = Directory('${appDocDir.path}/downloads');
+      // ── Step 1: Resolve stream URL via Consumet ─────────────────────────
+      _activeStatus[id] = 'Finding download source for "$title"...';
+      notifyListeners();
+
+      StreamResult? result;
+      try {
+        if (mediaType == 'movie') {
+          result = await StreamResolverService.resolveMovie(id, title);
+        } else {
+          result = await StreamResolverService.resolveTv(id, 1, 1, title);
+        }
+      } catch (_) {
+        result = null;
+      }
+
+      // Must be a native (direct URL) stream to download
+      if (result == null || !result.isNative) {
+        _activeStatus[id] = 'No downloadable source found.\nTry playing first to cache URL.';
+        notifyListeners();
+        await Future.delayed(const Duration(seconds: 3));
+        _cleanup(id);
+        return;
+      }
+
+      final sourceUrl = result.url;
+
+      // ── Step 2: Set up local file path ────────────────────────────────
+      Directory downloadsDir;
+      try {
+        // Try external storage first (visible in Files app)
+        final extDir = await getExternalStorageDirectory();
+        downloadsDir = Directory('${extDir!.path}/StreamSync');
+      } catch (_) {
+        final appDir = await getApplicationDocumentsDirectory();
+        downloadsDir = Directory('${appDir.path}/StreamSync');
+      }
+
       if (!await downloadsDir.exists()) {
         await downloadsDir.create(recursive: true);
       }
-      final fileName = '${details['media_type']}_$id.mp4';
+
+      // Clean title for filename
+      final cleanTitle = title
+          .replaceAll(RegExp(r'[^\w\s-]'), '')
+          .replaceAll(RegExp(r'\s+'), '_')
+          .toLowerCase();
+      final ext = sourceUrl.contains('.m3u8') ? 'mp4' : 'mp4';
+      final fileName = '${cleanTitle}_$id.$ext';
       final filePath = '${downloadsDir.path}/$fileName';
 
-      // Check if we have intercepted a real direct movie stream URL previously
-      final resolvedUrl = dbService.resolvedUrls[id];
-      final sourceUrl = resolvedUrl ?? 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4';
+      _activeStatus[id] = 'Starting download via ${result.source}...';
+      notifyListeners();
 
-      if (resolvedUrl == null) {
-        _activeStatus[id] = 'Playing sample (Play online first for real source)...';
-        notifyListeners();
-        await Future.delayed(const Duration(seconds: 2));
-      }
-      
+      // ── Step 3: Download the file ─────────────────────────────────────
       final dio = Dio();
-      
+      dio.options.headers = {
+        'User-Agent': 'Mozilla/5.0 (Linux; Android 12) AppleWebKit/537.36',
+        'Referer': 'https://vidlink.pro/',
+      };
+
       await dio.download(
         sourceUrl,
         filePath,
@@ -66,43 +108,51 @@ class DownloadService extends ChangeNotifier {
             _activeProgress[id] = (received / total).clamp(0.0, 1.0);
             final recMB = (received / (1024 * 1024)).toStringAsFixed(1);
             final totMB = (total / (1024 * 1024)).toStringAsFixed(1);
-            _activeStatus[id] = resolvedUrl == null 
-                ? '$recMB MB / $totMB MB (Sample)' 
-                : '$recMB MB / $totMB MB';
+            _activeStatus[id] = 'Downloading: $recMB / $totMB MB';
+            notifyListeners();
+          } else {
+            // Unknown total — show received
+            final recMB = (received / (1024 * 1024)).toStringAsFixed(1);
+            _activeStatus[id] = 'Downloading: ${recMB} MB...';
             notifyListeners();
           }
         },
       );
 
-      // Save to database
+      // ── Step 4: Save record to database ──────────────────────────────
       final detailedItem = Map<String, dynamic>.from(details);
       detailedItem['download_quality'] = selectedQuality;
       detailedItem['download_language'] = selectedLanguage;
       detailedItem['local_file_path'] = filePath;
-      detailedItem['file_size_bytes'] = File(filePath).lengthSync();
+      detailedItem['stream_source'] = result.source;
+      detailedItem['file_size_bytes'] = File(filePath).existsSync()
+          ? File(filePath).lengthSync()
+          : 0;
       detailedItem['download_date'] = DateTime.now().toIso8601String();
-      
+
       await dbService.addDownload(detailedItem);
-      
+
+      _activeStatus[id] = '✅ Downloaded!';
+      notifyListeners();
+      await Future.delayed(const Duration(seconds: 1));
       _cleanup(id);
+
     } catch (e) {
-      String errMsg = 'Download failed.';
+      String errMsg;
       if (e is DioException && CancelToken.isCancel(e)) {
-        debugPrint('Download cancelled manually for ID: $id');
-        errMsg = 'Download cancelled.';
         _cleanup(id);
         return;
-      } else if (e is FileSystemException || e.toString().contains('No space') || e.toString().contains('Disk full')) {
-        errMsg = 'Out of space!';
+      } else if (e.toString().contains('No space') || e.toString().contains('Disk full')) {
+        errMsg = '❌ Not enough storage space!';
+      } else if (e.toString().contains('SocketException') || e.toString().contains('network')) {
+        errMsg = '❌ Network error. Check your connection.';
       } else {
-        errMsg = 'Network error!';
+        errMsg = '❌ Download failed. Try again.';
+        debugPrint('Download error: $e');
       }
-      
-      _activeProgress[id] = 0.0;
+
       _activeStatus[id] = errMsg;
       notifyListeners();
-      
-      // Leave error status visible for a brief moment
       await Future.delayed(const Duration(seconds: 3));
       _cleanup(id);
     }

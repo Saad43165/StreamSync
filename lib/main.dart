@@ -14,8 +14,11 @@ import 'screens/profile_screen.dart';
 import 'screens/splash_screen.dart';
 import 'widgets/floating_download_widget.dart';
 
+import 'package:media_kit/media_kit.dart';
+
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  MediaKit.ensureInitialized();
   await Hive.initFlutter();
   await Hive.openBox('tmdb_cache_box');
   runApp(
