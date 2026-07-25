@@ -110,19 +110,19 @@ class TMDBService extends ChangeNotifier {
     try {
       // 2. Fetch all components in parallel to drastically improve network performance
       final responses = await Future.wait([
-        http.get(Uri.parse('$_baseUrl/trending/all/day?api_key=${AppConfig.tmdbApiKey}')),
-        http.get(Uri.parse('$_baseUrl/discover/movie?api_key=${AppConfig.tmdbApiKey}&sort_by=popularity.desc')),
-        http.get(Uri.parse('$_baseUrl/discover/tv?api_key=${AppConfig.tmdbApiKey}&sort_by=popularity.desc')),
-        http.get(Uri.parse('$_baseUrl/discover/movie?api_key=${AppConfig.tmdbApiKey}&with_watch_providers=8&watch_region=US&sort_by=popularity.desc')),
-        http.get(Uri.parse('$_baseUrl/discover/movie?api_key=${AppConfig.tmdbApiKey}&with_watch_providers=9&watch_region=US&sort_by=popularity.desc')),
-        http.get(Uri.parse('$_baseUrl/discover/movie?api_key=${AppConfig.tmdbApiKey}&with_watch_providers=337&watch_region=US&sort_by=popularity.desc')),
-        http.get(Uri.parse('$_baseUrl/discover/movie?api_key=${AppConfig.tmdbApiKey}&with_genres=28&sort_by=popularity.desc')),
-        http.get(Uri.parse('$_baseUrl/discover/movie?api_key=${AppConfig.tmdbApiKey}&with_genres=35&sort_by=popularity.desc')),
-        http.get(Uri.parse('$_baseUrl/discover/movie?api_key=${AppConfig.tmdbApiKey}&with_genres=878&sort_by=popularity.desc')),
-        http.get(Uri.parse('$_baseUrl/discover/movie?api_key=${AppConfig.tmdbApiKey}&with_genres=27&sort_by=popularity.desc')),
-        http.get(Uri.parse('$_baseUrl/movie/upcoming?api_key=${AppConfig.tmdbApiKey}')),
-        http.get(Uri.parse('$_baseUrl/discover/movie?api_key=${AppConfig.tmdbApiKey}&with_original_language=hi&sort_by=popularity.desc')),
-        http.get(Uri.parse('$_baseUrl/discover/tv?api_key=${AppConfig.tmdbApiKey}&with_original_language=ur&sort_by=popularity.desc')),
+        http.get(Uri.parse('$_baseUrl/trending/all/day?api_key=${AppConfig.tmdbApiKey}')).timeout(const Duration(seconds: 15)),
+        http.get(Uri.parse('$_baseUrl/discover/movie?api_key=${AppConfig.tmdbApiKey}&sort_by=popularity.desc')).timeout(const Duration(seconds: 15)),
+        http.get(Uri.parse('$_baseUrl/discover/tv?api_key=${AppConfig.tmdbApiKey}&sort_by=popularity.desc')).timeout(const Duration(seconds: 15)),
+        http.get(Uri.parse('$_baseUrl/discover/movie?api_key=${AppConfig.tmdbApiKey}&with_watch_providers=8&watch_region=US&sort_by=popularity.desc')).timeout(const Duration(seconds: 15)),
+        http.get(Uri.parse('$_baseUrl/discover/movie?api_key=${AppConfig.tmdbApiKey}&with_watch_providers=9&watch_region=US&sort_by=popularity.desc')).timeout(const Duration(seconds: 15)),
+        http.get(Uri.parse('$_baseUrl/discover/movie?api_key=${AppConfig.tmdbApiKey}&with_watch_providers=337&watch_region=US&sort_by=popularity.desc')).timeout(const Duration(seconds: 15)),
+        http.get(Uri.parse('$_baseUrl/discover/movie?api_key=${AppConfig.tmdbApiKey}&with_genres=28&sort_by=popularity.desc')).timeout(const Duration(seconds: 15)),
+        http.get(Uri.parse('$_baseUrl/discover/movie?api_key=${AppConfig.tmdbApiKey}&with_genres=35&sort_by=popularity.desc')).timeout(const Duration(seconds: 15)),
+        http.get(Uri.parse('$_baseUrl/discover/movie?api_key=${AppConfig.tmdbApiKey}&with_genres=878&sort_by=popularity.desc')).timeout(const Duration(seconds: 15)),
+        http.get(Uri.parse('$_baseUrl/discover/movie?api_key=${AppConfig.tmdbApiKey}&with_genres=27&sort_by=popularity.desc')).timeout(const Duration(seconds: 15)),
+        http.get(Uri.parse('$_baseUrl/movie/upcoming?api_key=${AppConfig.tmdbApiKey}')).timeout(const Duration(seconds: 15)),
+        http.get(Uri.parse('$_baseUrl/discover/movie?api_key=${AppConfig.tmdbApiKey}&with_original_language=hi&sort_by=popularity.desc')).timeout(const Duration(seconds: 15)),
+        http.get(Uri.parse('$_baseUrl/discover/tv?api_key=${AppConfig.tmdbApiKey}&with_original_language=ur&sort_by=popularity.desc')).timeout(const Duration(seconds: 15)),
       ]);
 
       // 3. Process trending
@@ -324,7 +324,7 @@ class TMDBService extends ChangeNotifier {
       return _getMockTrending().take(4).toList();
     }
     try {
-      final res = await http.get(Uri.parse('$_baseUrl/$mediaType/$id/recommendations?api_key=${AppConfig.tmdbApiKey}'));
+      final res = await http.get(Uri.parse('$_baseUrl/$mediaType/$id/recommendations?api_key=${AppConfig.tmdbApiKey}')).timeout(const Duration(seconds: 15));
       if (res.statusCode == 200) {
         final data = json.decode(res.body);
         final results = data['results'] as List<dynamic>? ?? [];
@@ -381,7 +381,7 @@ class TMDBService extends ChangeNotifier {
     try {
       final response = await http.get(Uri.parse(
         '$_baseUrl/$mediaType/$id?api_key=${AppConfig.tmdbApiKey}&append_to_response=videos,watch/providers'
-      ));
+      )).timeout(const Duration(seconds: 15));
 
       if (response.statusCode == 200) {
         final data = json.decode(response.body);

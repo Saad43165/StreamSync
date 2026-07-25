@@ -225,6 +225,8 @@ class DatabaseService extends ChangeNotifier {
       final historyKey = "streamsync_${activeScope}_history";
       final statsKey = "streamsync_${activeScope}_watch_stats";
 
+      final bool isNewEntry = !_watchHistory.any((x) => x['id'] == item['id']);
+
       _watchHistory.removeWhere((x) => x['id'] == item['id']); // Move to top of list if played again
       _watchHistory.insert(0, {
         'id': item['id'],
@@ -233,23 +235,48 @@ class DatabaseService extends ChangeNotifier {
         'media_type': item['media_type'] ?? 'movie',
         'season': season,
         'episode': episode,
+        'progress_seconds': 0,
+        'duration_seconds': 0,
         'last_watched': DateTime.now().toIso8601String(),
       });
 
-      if (_watchHistory.length > 10) {
-        _watchHistory.removeLast(); // Limit history to last 10 titles
+      if (_watchHistory.length > 20) {
+        _watchHistory.removeLast(); // Limit history to last 20 titles
       }
 
       final stringList = _watchHistory.map((x) => json.encode(x)).toList();
       await prefs.setStringList(historyKey, stringList);
 
-      // Increment watch stats when user actually streams the title
-      _totalHoursWatched += 2; // Increments actual watch metrics
-      await prefs.setInt(statsKey, _totalHoursWatched);
+      // Increment watch stats only when a new title is started
+      if (isNewEntry) {
+        _totalHoursWatched += 2; // Increments actual watch metrics approx
+        await prefs.setInt(statsKey, _totalHoursWatched);
+      }
 
       notifyListeners();
     } catch (e) {
       debugPrint('Error adding to history: $e');
+    }
+  }
+
+  // Update progress for an existing history item
+  Future<void> updateHistoryProgress(int id, int progress, int duration) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final activeScope = _isLoggedIn ? "auth_user_$username" : _currentProfile;
+      final historyKey = "streamsync_${activeScope}_history";
+
+      final index = _watchHistory.indexWhere((x) => x['id'] == id);
+      if (index != -1) {
+        _watchHistory[index]['progress_seconds'] = progress;
+        _watchHistory[index]['duration_seconds'] = duration;
+        
+        final stringList = _watchHistory.map((x) => json.encode(x)).toList();
+        await prefs.setStringList(historyKey, stringList);
+        // Do not notifyListeners() here to avoid rebuilding UI every 5 seconds during playback
+      }
+    } catch (e) {
+      debugPrint('Error updating history progress: $e');
     }
   }
 

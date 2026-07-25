@@ -427,6 +427,10 @@ class _HomeScreenState extends State<HomeScreen> {
                   ? 'Season ${item['season'] ?? 1}, Episode ${item['episode'] ?? 1}'
                   : 'Movie Stream';
 
+              final progress = item['progress_seconds'] as int? ?? 0;
+              final duration = item['duration_seconds'] as int? ?? 0;
+              final double percent = duration > 0 ? (progress / duration).clamp(0.0, 1.0) : 0.0;
+
               return GestureDetector(
                 onTap: () {
                   Navigator.push(
@@ -465,7 +469,7 @@ class _HomeScreenState extends State<HomeScreen> {
                           child: Icon(Icons.play_circle_outline_rounded, color: Colors.white, size: 36),
                         ),
                         Positioned(
-                          bottom: 8,
+                          bottom: 12,
                           left: 10,
                           right: 10,
                           child: Column(
@@ -484,6 +488,18 @@ class _HomeScreenState extends State<HomeScreen> {
                             ],
                           ),
                         ),
+                        if (percent > 0.0)
+                          Positioned(
+                            bottom: 0,
+                            left: 0,
+                            right: 0,
+                            child: LinearProgressIndicator(
+                              value: percent,
+                              backgroundColor: Colors.white24,
+                              valueColor: const AlwaysStoppedAnimation<Color>(AppTheme.accent),
+                              minHeight: 4,
+                            ),
+                          ),
                       ],
                     ),
                   ),
@@ -563,6 +579,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       builder: (context) => DetailsScreen(
                         id: item['id'],
                         mediaType: 'movie',
+                        posterUrl: imageUrl,
                       ),
                     ),
                   );
@@ -574,8 +591,10 @@ class _HomeScreenState extends State<HomeScreen> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Expanded(
-                        child: ClipRRect(
-                          borderRadius: BorderRadius.circular(12),
+                        child: Hero(
+                          tag: 'poster_${item['id']}',
+                          child: ClipRRect(
+                            borderRadius: BorderRadius.circular(12),
                           child: Stack(
                             fit: StackFit.expand,
                             children: [
@@ -600,6 +619,7 @@ class _HomeScreenState extends State<HomeScreen> {
                               ),
                             ],
                           ),
+                        ),
                         ),
                       ),
                       const SizedBox(height: 6),
@@ -1103,6 +1123,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   builder: (context) => DetailsScreen(
                     id: item['id'],
                     mediaType: item['media_type'] ?? (item['title'] != null ? 'movie' : 'tv'),
+                    posterUrl: imageUrl,
                   ),
                 ),
               );
@@ -1114,8 +1135,10 @@ class _HomeScreenState extends State<HomeScreen> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Expanded(
-                    child: ClipRRect(
-                      borderRadius: BorderRadius.circular(12),
+                    child: Hero(
+                      tag: 'poster_${item['id']}',
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(12),
                       child: Stack(
                         fit: StackFit.expand,
                         children: [
@@ -1182,6 +1205,7 @@ class _HomeScreenState extends State<HomeScreen> {
                           ),
                         ],
                       ),
+                    ),
                     ),
                   ),
                   const SizedBox(height: 8),

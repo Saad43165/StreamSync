@@ -15,11 +15,13 @@ import 'stream_player_screen.dart';
 class DetailsScreen extends StatefulWidget {
   final int id;
   final String mediaType;
+  final String? posterUrl;
 
   const DetailsScreen({
     super.key,
     required this.id,
     required this.mediaType,
+    this.posterUrl,
   });
 
   @override
@@ -254,56 +256,94 @@ class _DetailsScreenState extends State<DetailsScreen> {
                   // 4. Title, rating and metadata tags
                   Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 20),
-                    child: Column(
+                    child: Row(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(
-                          title,
-                          style: const TextStyle(
-                            fontSize: 28,
-                            fontWeight: FontWeight.bold,
-                            color: Colors.white,
-                            letterSpacing: 0.5,
-                          ),
-                        ),
-                        const SizedBox(height: 8),
-                        Row(
-                          children: [
-                            Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                              decoration: BoxDecoration(
-                                color: AppTheme.secondaryAccent.withOpacity(0.15),
-                                borderRadius: BorderRadius.circular(6),
+                        if (widget.posterUrl != null || details['poster_path'] != null)
+                          Hero(
+                            tag: 'poster_${widget.id}',
+                            child: ClipRRect(
+                              borderRadius: BorderRadius.circular(12),
+                              child: Container(
+                                width: 100,
+                                height: 150,
+                                margin: const EdgeInsets.only(right: 16),
+                                decoration: const BoxDecoration(
+                                  boxShadow: [BoxShadow(color: Colors.black54, blurRadius: 10)],
+                                ),
+                                child: Image.network(
+                                  widget.posterUrl ?? details['poster_path'],
+                                  fit: BoxFit.cover,
+                                  loadingBuilder: (context, child, loadingProgress) {
+                                    if (loadingProgress == null) return child;
+                                    return const ImageShimmerPlaceholder(borderRadius: 12);
+                                  },
+                                  errorBuilder: (context, error, stackTrace) => Container(
+                                    color: AppTheme.surface,
+                                    child: const Icon(Icons.movie, color: Colors.white24, size: 36),
+                                  ),
+                                ),
                               ),
-                              child: Row(
+                            ),
+                          ),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                title,
+                                style: const TextStyle(
+                                  fontSize: 24,
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.white,
+                                  letterSpacing: 0.5,
+                                ),
+                              ),
+                              const SizedBox(height: 12),
+                              Wrap(
+                                spacing: 12,
+                                runSpacing: 8,
                                 children: [
-                                  const Icon(Icons.star_rounded, color: AppTheme.secondaryAccent, size: 16),
-                                  const SizedBox(width: 4),
-                                  Text(
-                                    rating,
-                                    style: const TextStyle(color: AppTheme.secondaryAccent, fontWeight: FontWeight.bold, fontSize: 12),
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                    decoration: BoxDecoration(
+                                      color: AppTheme.secondaryAccent.withOpacity(0.15),
+                                      borderRadius: BorderRadius.circular(6),
+                                    ),
+                                    child: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        const Icon(Icons.star_rounded, color: AppTheme.secondaryAccent, size: 16),
+                                        const SizedBox(width: 4),
+                                        Text(
+                                          rating,
+                                          style: const TextStyle(color: AppTheme.secondaryAccent, fontWeight: FontWeight.bold, fontSize: 12),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                  Padding(
+                                    padding: const EdgeInsets.only(top: 2.0),
+                                    child: Text(
+                                      releaseYear,
+                                      style: const TextStyle(color: AppTheme.textSecondary, fontSize: 13, fontWeight: FontWeight.w500),
+                                    ),
+                                  ),
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                    decoration: BoxDecoration(
+                                      border: Border.all(color: Colors.white30),
+                                      borderRadius: BorderRadius.circular(4),
+                                    ),
+                                    child: const Text(
+                                      'HD',
+                                      style: TextStyle(color: Colors.white70, fontSize: 10, fontWeight: FontWeight.bold),
+                                    ),
                                   ),
                                 ],
                               ),
-                            ),
-                            const SizedBox(width: 12),
-                            Text(
-                              releaseYear,
-                              style: const TextStyle(color: AppTheme.textSecondary, fontSize: 13, fontWeight: FontWeight.w500),
-                            ),
-                            const SizedBox(width: 12),
-                            Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                              decoration: BoxDecoration(
-                                border: Border.all(color: Colors.white30),
-                                borderRadius: BorderRadius.circular(4),
-                              ),
-                              child: const Text(
-                                'HD',
-                                style: TextStyle(color: Colors.white70, fontSize: 10, fontWeight: FontWeight.bold),
-                              ),
-                            ),
-                          ],
+                            ],
+                          ),
                         ),
                       ],
                     ),

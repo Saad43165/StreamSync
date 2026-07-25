@@ -44,7 +44,19 @@ class _StreamPlayerScreenState extends State<StreamPlayerScreen> with WidgetsBin
   late int _currentSeason;
   late int _currentEpisode;
   late int _episodeCount;
-  String _mirrorSource = 'vidsrc.to'; // 'vidsrc.to', 'vidsrc.me', 'embed.su'
+  String _mirrorSource = 'vidlink.pro'; // Default to a reliable mirror
+
+  static const List<String> _availableMirrors = [
+    'vidlink.pro',
+    'multiembed.to',
+    'vidsrc.to',
+    'vidsrc.me',
+    'embed.su',
+    'vidsrc.cc',
+    'vidsrc.nl',
+    'smashystream',
+    '2embed.cc',
+  ];
   
   // Stability: GlobalKey to preserve WebView state across orientation changes
   final GlobalKey _webViewKey = GlobalKey();
@@ -69,6 +81,7 @@ class _StreamPlayerScreenState extends State<StreamPlayerScreen> with WidgetsBin
   int _activeTab = 0; // 0 = Mirrors & Episodes, 1 = Overview, 2 = Audio & Speed
 
   double _originalBrightness = 0.5;
+  bool _isAutoPlayingNext = false;
 
   @override
   void initState() {
@@ -405,30 +418,132 @@ class _StreamPlayerScreenState extends State<StreamPlayerScreen> with WidgetsBin
 
   void _handleLoadFailure() {
     if (!mounted) return;
+    
+    final currentIndex = _availableMirrors.indexOf(_mirrorSource);
+    if (currentIndex != -1 && currentIndex < _availableMirrors.length - 1) {
+      final nextMirror = _availableMirrors[currentIndex + 1];
+      setState(() {
+        _mirrorSource = nextMirror;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Mirror offline. Switching to backup: $nextMirror...'),
+          duration: const Duration(seconds: 2),
+          backgroundColor: Colors.orangeAccent,
+        ),
+      );
+      _reloadStream();
+    } else {
+      // If we've exhausted all mirrors
+      showDialog(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          backgroundColor: AppTheme.surface,
+          title: const Text('All Mirrors Failed', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+          content: const Text(
+            'We tried multiple backup mirrors, but none seem to be working right now. Please try again later or check your internet connection.',
+            style: TextStyle(color: AppTheme.textSecondary),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () {
+                Navigator.pop(ctx);
+                Navigator.pop(context); // Go back to details screen
+              },
+              child: const Text('Go Back', style: TextStyle(color: Colors.white54)),
+            ),
+          ],
+        ),
+      );
+    }
+  }
+
+  void _handleVideoProgress(int currentTime, int duration) {
+    if (!mounted) return;
+
+    // Save progress to database
+    if (currentTime > 0 && duration > 0) {
+      Provider.of<DatabaseService>(context, listen: false)
+          .updateHistoryProgress(widget.id, currentTime, duration);
+    }
+
+    // Auto-Play Next Episode logic
+    if (widget.mediaType != 'movie' && duration > 0 && (duration - currentTime) <= 15) {
+      final db = Provider.of<DatabaseService>(context, listen: false);
+      if (db.autoPlayNext && !_isAutoPlayingNext && _currentEpisode < _episodeCount) {
+        _isAutoPlayingNext = true;
+        _showAutoPlayNextCountdown();
+      }
+    }
+  }
+
+  void _showAutoPlayNextCountdown() {
+    if (!mounted) return;
+    
+    int countdown = 10;
+    StateSetter? dialogSetState;
+    
     showDialog(
       context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: AppTheme.surface,
-        title: const Text('Mirror Connection Issue', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-        content: const Text(
-          'This mirror source seems to be offline or blocked. Would you like to switch to a backup mirror?',
-          style: TextStyle(color: AppTheme.textSecondary),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('Cancel', style: TextStyle(color: Colors.white54)),
-          ),
-          TextButton(
-            onPressed: () {
-              Navigator.pop(ctx);
-              _showMirrorSelectorSheet(context);
-            },
-            child: const Text('Switch Mirror', style: TextStyle(color: AppTheme.accent, fontWeight: FontWeight.bold)),
-          ),
-        ],
-      ),
+      barrierDismissible: false,
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (context, setState) {
+            dialogSetState = setState;
+            return AlertDialog(
+              backgroundColor: AppTheme.surface.withValues(alpha: 0.9),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+              title: const Text('Up Next', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+              content: Text(
+                'Playing Episode ${_currentEpisode + 1} in $countdown seconds...',
+                style: const TextStyle(color: AppTheme.textSecondary),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () {
+                    Navigator.pop(ctx);
+                    _isAutoPlayingNext = false;
+                  },
+                  child: const Text('Cancel', style: TextStyle(color: Colors.white54)),
+                ),
+                ElevatedButton(
+                  onPressed: () {
+                    Navigator.pop(ctx);
+                    _isAutoPlayingNext = false;
+                    _playNextEpisode();
+                  },
+                  style: ElevatedButton.styleFrom(backgroundColor: AppTheme.accent),
+                  child: const Text('Play Now', style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
+                ),
+              ],
+            );
+          }
+        );
+      },
     );
+
+    Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (!mounted || !_isAutoPlayingNext) {
+        timer.cancel();
+        return;
+      }
+      
+      countdown--;
+      
+      if (dialogSetState != null) {
+         dialogSetState!(() {});
+      }
+
+      if (countdown <= 0) {
+        timer.cancel();
+        if (_isAutoPlayingNext) {
+          // If still active, pop dialog and play next
+          Navigator.of(context, rootNavigator: true).pop();
+          _isAutoPlayingNext = false;
+          _playNextEpisode();
+        }
+      }
+    });
   }
 
   Widget _buildWebView() {
@@ -479,6 +594,17 @@ class _StreamPlayerScreenState extends State<StreamPlayerScreen> with WidgetsBin
       ),
       onWebViewCreated: (controller) {
         _webViewController = controller;
+        controller.addJavaScriptHandler(
+          handlerName: 'VideoProgress',
+          callback: (args) {
+            if (args.isNotEmpty && args[0] is Map) {
+              final data = args[0] as Map;
+              final currentTime = (data['currentTime'] as num?)?.toInt() ?? 0;
+              final duration = (data['duration'] as num?)?.toInt() ?? 0;
+              _handleVideoProgress(currentTime, duration);
+            }
+          },
+        );
       },
       shouldOverrideUrlLoading: (controller, navigationAction) async {
         final uri = navigationAction.request.url;
@@ -542,10 +668,22 @@ class _StreamPlayerScreenState extends State<StreamPlayerScreen> with WidgetsBin
           // Apply caption settings after load
           _applyCaptionSettings();
           
-          // Block single tap on HTML video element from triggering play/pause
-          const tapBlockerJs = '''
+          // Restore saved progress (Continue Watching)
+          final db = Provider.of<DatabaseService>(context, listen: false);
+          final historyItem = db.watchHistory.firstWhere((x) => x['id'] == widget.id, orElse: () => {});
+          if (historyItem.isNotEmpty && historyItem['progress_seconds'] != null) {
+            final progress = historyItem['progress_seconds'] as int;
+            if (progress > 10) {
+               // Inject a seek command once video is initialized
+               final jsSeek = "setTimeout(() => { document.querySelectorAll('video').forEach(v => v.currentTime = $progress); }, 1500);";
+               _webViewController?.evaluateJavascript(source: jsSeek);
+            }
+          }
+
+          // Inject tap blocker and progress tracker
+          const trackerJs = '''
             (function() {
-              function preventVideoClick() {
+              function initHooks() {
                 document.querySelectorAll('video').forEach(video => {
                   if (!video.dataset.clickBlocked) {
                     video.dataset.clickBlocked = 'true';
@@ -555,12 +693,20 @@ class _StreamPlayerScreenState extends State<StreamPlayerScreen> with WidgetsBin
                     }, true);
                   }
                 });
+                
+                var v = document.querySelector('video');
+                if (v && !v.paused && v.duration > 0) {
+                  window.flutter_inappwebview.callHandler('VideoProgress', {
+                    'currentTime': v.currentTime,
+                    'duration': v.duration
+                  });
+                }
               }
-              preventVideoClick();
-              setInterval(preventVideoClick, 1000);
+              initHooks();
+              setInterval(initHooks, 3000); // Check every 3 seconds
             })();
           ''';
-          _webViewController?.evaluateJavascript(source: tapBlockerJs);
+          _webViewController?.evaluateJavascript(source: trackerJs);
         }
       },
       onEnterFullscreen: (controller) {
