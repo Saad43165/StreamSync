@@ -78,20 +78,20 @@ class _SeeAllScreenState extends State<SeeAllScreen> {
             padding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
             child: Container(
               decoration: BoxDecoration(
-                color: Colors.white.withOpacity(0.05),
+                color: Colors.white.withValues(alpha: 0.05),
                 borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: Colors.white.withOpacity(0.08)),
+                border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
               ),
               child: TextField(
                 controller: _searchController,
                 style: const TextStyle(color: Colors.white, fontSize: 14),
                 decoration: InputDecoration(
                   hintText: 'Search within ${widget.categoryTitle.toLowerCase()}...',
-                  hintStyle: TextStyle(color: Colors.white.withOpacity(0.4), fontSize: 14),
-                  prefixIcon: Icon(Icons.search_rounded, color: Colors.white.withOpacity(0.4)),
+                  hintStyle: TextStyle(color: Colors.white.withValues(alpha: 0.4), fontSize: 14),
+                  prefixIcon: Icon(Icons.search_rounded, color: Colors.white.withValues(alpha: 0.4)),
                   suffixIcon: _searchController.text.isNotEmpty
                       ? IconButton(
-                          icon: Icon(Icons.clear_rounded, color: Colors.white.withOpacity(0.4)),
+                          icon: Icon(Icons.clear_rounded, color: Colors.white.withValues(alpha: 0.4)),
                           onPressed: () => _searchController.clear(),
                         )
                       : null,
@@ -108,7 +108,7 @@ class _SeeAllScreenState extends State<SeeAllScreen> {
                 ? Center(
                     child: Text(
                       'No matching titles found.',
-                      style: TextStyle(color: Colors.white.withOpacity(0.6)),
+                      style: TextStyle(color: Colors.white.withValues(alpha: 0.6)),
                     ),
                   )
                 : GridView.builder(

@@ -1,12 +1,151 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:hive/hive.dart';
+import 'package:flutter_animate/flutter_animate.dart';
 import '../services/database_service.dart';
 import '../services/tmdb_service.dart';
 import '../theme/app_theme.dart';
 import '../screens/login_screen.dart';
+import '../widgets/glass_card.dart';
 
-class SettingsScreen extends StatelessWidget {
+class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
+
+  @override
+  State<SettingsScreen> createState() => _SettingsScreenState();
+}
+
+class _SettingsScreenState extends State<SettingsScreen> {
+  String _downloadsSize = "0.0 MB";
+  String _cacheSize = "0.0 KB";
+  bool _isLoadingMetrics = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadMetrics();
+  }
+
+  Future<void> _loadMetrics() async {
+    setState(() {
+      _isLoadingMetrics = true;
+    });
+
+    try {
+      final docDir = await getApplicationDocumentsDirectory();
+      int downloadsBytes = 0;
+      int cacheBytes = 0;
+
+      if (await docDir.exists()) {
+        await for (final file in docDir.list(recursive: true, followLinks: false)) {
+          if (file is File) {
+            final path = file.path;
+            if (path.endsWith('.mp4')) {
+              downloadsBytes += await file.length();
+            } else if (path.endsWith('.hive') || path.endsWith('.hive.lock') || path.contains('tmdb_cache_box')) {
+              cacheBytes += await file.length();
+            }
+          }
+        }
+      }
+
+      if (mounted) {
+        setState(() {
+          _downloadsSize = "${(downloadsBytes / (1024 * 1024)).toStringAsFixed(1)} MB";
+          _cacheSize = "${(cacheBytes / 1024).toStringAsFixed(1)} KB";
+          _isLoadingMetrics = false;
+        });
+      }
+    } catch (e) {
+      debugPrint('Error loading file storage metrics: $e');
+      if (mounted) {
+        setState(() {
+          _isLoadingMetrics = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _clearCache(BuildContext context, TMDBService tmdbService) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppTheme.surface,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text('Clear TMDB Cache', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+        content: const Text(
+          'This will wipe out cached pages and offline lists, forcing the app to fetch real-time fresh API data.',
+          style: TextStyle(color: AppTheme.textSecondary, fontSize: 13, height: 1.4),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel', style: TextStyle(color: AppTheme.textSecondary)),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Wipe Cache', style: TextStyle(color: AppTheme.accent, fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true) {
+      try {
+        final cacheBox = Hive.box('tmdb_cache_box');
+        await cacheBox.clear();
+        await tmdbService.fetchTrending();
+        await _loadMetrics();
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Hive TMDB Category cache cleared successfully.')),
+          );
+        }
+      } catch (e) {
+        debugPrint('Failed to clear hive box: $e');
+      }
+    }
+  }
+
+  Future<void> _purgeAllDownloads(BuildContext context, DatabaseService dbService) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppTheme.surface,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text('Delete All Downloads', style: TextStyle(color: Colors.redAccent, fontWeight: FontWeight.bold)),
+        content: const Text(
+          'This will permanently delete ALL offline video files (.mp4 chunks) from your local device storage.',
+          style: TextStyle(color: AppTheme.textSecondary, fontSize: 13, height: 1.4),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel', style: TextStyle(color: AppTheme.textSecondary)),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Delete All', style: TextStyle(color: Colors.redAccent, fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true) {
+      final list = List.from(dbService.downloads);
+      for (final item in list) {
+        await dbService.removeDownload(item['id'] as int);
+      }
+      await _loadMetrics();
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('All offline storage files purged.')),
+        );
+      }
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -17,7 +156,7 @@ class SettingsScreen extends StatelessWidget {
       backgroundColor: AppTheme.background,
       appBar: AppBar(
         title: const Text(
-          'Settings',
+          'Settings & Storage',
           style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
         ),
         backgroundColor: Colors.transparent,
@@ -29,26 +168,31 @@ class SettingsScreen extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-
             // ─── Account Section ───────────────────────────
-            _sectionLabel('Account'),
+            _sectionLabel('Account Details'),
             _settingsCard([
               if (dbService.isLoggedIn) ...[
                 _infotile(
                   icon: Icons.person_rounded,
                   label: 'Signed in as',
-                  trailing: Text('@${dbService.username}', style: const TextStyle(color: AppTheme.accent, fontSize: 13, fontWeight: FontWeight.bold)),
+                  trailing: Text(
+                    '@${dbService.username}',
+                    style: const TextStyle(color: AppTheme.accent, fontSize: 13, fontWeight: FontWeight.bold),
+                  ),
                 ),
                 _divider(),
                 _infotile(
                   icon: Icons.email_outlined,
-                  label: 'Email',
-                  trailing: Text(dbService.email, style: const TextStyle(color: AppTheme.textSecondary, fontSize: 12)),
+                  label: 'Email Address',
+                  trailing: Text(
+                    dbService.email,
+                    style: const TextStyle(color: AppTheme.textSecondary, fontSize: 12),
+                  ),
                 ),
                 _divider(),
                 _actiontile(
                   icon: Icons.logout_rounded,
-                  label: 'Sign Out',
+                  label: 'Sign Out Account',
                   color: Colors.redAccent,
                   onTap: () {
                     dbService.logout();
@@ -60,7 +204,7 @@ class SettingsScreen extends StatelessWidget {
               ] else ...[
                 _actiontile(
                   icon: Icons.login_rounded,
-                  label: 'Sign In / Create Account',
+                  label: 'Sign In / Register Account',
                   color: AppTheme.accent,
                   onTap: () => Navigator.push(
                     context,
@@ -68,22 +212,65 @@ class SettingsScreen extends StatelessWidget {
                   ),
                 ),
                 const Padding(
-                  padding: EdgeInsets.fromLTRB(16, 4, 16, 12),
+                  padding: EdgeInsets.fromLTRB(16, 4, 16, 14),
                   child: Text(
-                    'Sign in to sync your watch history and watchlist across devices.',
-                    style: TextStyle(color: AppTheme.textSecondary, fontSize: 11),
+                    'Unlock cross-device sync of watchlist, watch history progress, and offline settings preferences.',
+                    style: TextStyle(color: AppTheme.textSecondary, fontSize: 11, height: 1.4),
                   ),
                 ),
               ],
-            ]),
+            ]).animate().fade(duration: 350.ms).slideY(begin: 0.1, end: 0, curve: Curves.easeOutQuad),
 
             const SizedBox(height: 20),
 
-            // ─── Profile Section ───────────────────────────
-            _sectionLabel('Active Profile'),
+            // ─── Statistics Grid (Real Stats Panel) ────────
+            _sectionLabel('Device & App Statistics'),
+            GridView.count(
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              crossAxisCount: 2,
+              childAspectRatio: 1.6,
+              crossAxisSpacing: 10,
+              mainAxisSpacing: 10,
+              children: [
+                _statCard(
+                  title: 'Offline Files',
+                  value: _isLoadingMetrics ? "..." : _downloadsSize,
+                  subtitle: '${dbService.downloads.length} items saved',
+                  icon: Icons.download_done_rounded,
+                  iconColor: AppTheme.accent,
+                ),
+                _statCard(
+                  title: 'TMDB Cache Box',
+                  value: _isLoadingMetrics ? "..." : _cacheSize,
+                  subtitle: 'Local API Store',
+                  icon: Icons.storage_rounded,
+                  iconColor: AppTheme.secondaryAccent,
+                ),
+                _statCard(
+                  title: 'Watch Duration',
+                  value: '${dbService.totalHoursWatched} Hours',
+                  subtitle: 'Recorded playback',
+                  icon: Icons.hourglass_empty_rounded,
+                  iconColor: Colors.blueAccent,
+                ),
+                _statCard(
+                  title: 'Watchlist Storage',
+                  value: '${dbService.watchlist.length} Titles',
+                  subtitle: 'Saved for later',
+                  icon: Icons.bookmark_added_rounded,
+                  iconColor: Colors.pinkAccent,
+                ),
+              ],
+            ).animate().fade(duration: 400.ms, delay: 50.ms).slideY(begin: 0.1, end: 0, curve: Curves.easeOutQuad),
+
+            const SizedBox(height: 20),
+
+            // ─── Profile Selection ─────────────────────────
+            _sectionLabel('Active User Profile'),
             _settingsCard([
               Padding(
-                padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
+                padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 16),
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                   children: dbService.profiles.map((profile) {
@@ -95,17 +282,18 @@ class SettingsScreen extends StatelessWidget {
                     return GestureDetector(
                       onTap: () {
                         dbService.selectProfile(profile);
+                        _loadMetrics();
                         ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(content: Text('Switched to $profile profile')),
+                          SnackBar(content: Text('Switched profile to: $profile')),
                         );
                       },
                       child: AnimatedOpacity(
                         opacity: isCurrent ? 1.0 : 0.5,
-                        duration: const Duration(milliseconds: 200),
+                        duration: const Duration(milliseconds: 250),
                         child: Column(
                           children: [
                             AnimatedContainer(
-                              duration: const Duration(milliseconds: 200),
+                              duration: const Duration(milliseconds: 250),
                               padding: EdgeInsets.all(isCurrent ? 3 : 0),
                               decoration: BoxDecoration(
                                 shape: BoxShape.circle,
@@ -116,7 +304,7 @@ class SettingsScreen extends StatelessWidget {
                               ),
                               child: CircleAvatar(
                                 radius: 24,
-                                backgroundColor: profileColor.withAlpha(60),
+                                backgroundColor: profileColor.withValues(alpha: 0.25),
                                 child: Text(
                                   profile.substring(0, 1),
                                   style: TextStyle(color: profileColor, fontSize: 18, fontWeight: FontWeight.bold),
@@ -132,16 +320,6 @@ class SettingsScreen extends StatelessWidget {
                                 fontWeight: isCurrent ? FontWeight.bold : FontWeight.normal,
                               ),
                             ),
-                            if (isCurrent)
-                              Container(
-                                margin: const EdgeInsets.only(top: 3),
-                                width: 20,
-                                height: 2,
-                                decoration: BoxDecoration(
-                                  color: profileColor,
-                                  borderRadius: BorderRadius.circular(1),
-                                ),
-                              ),
                           ],
                         ),
                       ),
@@ -149,12 +327,12 @@ class SettingsScreen extends StatelessWidget {
                   }).toList(),
                 ),
               ),
-            ]),
+            ]).animate().fade(duration: 450.ms, delay: 100.ms).slideY(begin: 0.1, end: 0, curve: Curves.easeOutQuad),
 
             const SizedBox(height: 20),
 
-            // ─── Streaming Region ───────────────────────────
-            _sectionLabel('Streaming Preferences'),
+            // ─── Playback settings ─────────────────────────
+            _sectionLabel('Streaming settings'),
             _settingsCard([
               _actiontile(
                 icon: Icons.language_rounded,
@@ -169,23 +347,44 @@ class SettingsScreen extends StatelessWidget {
                 onTap: () => _showRegionPicker(context, dbService, tmdbService),
               ),
               _divider(),
-              _infotile(
+              _actiontile(
                 icon: Icons.subtitles_outlined,
-                label: 'Subtitles & Audio',
-                trailing: const Text('Auto-detect', style: TextStyle(color: AppTheme.textSecondary, fontSize: 12)),
+                label: 'Subtitles Multiplier',
+                trailing: Text(
+                  dbService.captionSizeMultiplier == 0.8 ? 'Small (80%)' :
+                  dbService.captionSizeMultiplier == 1.0 ? 'Medium (100%)' :
+                  dbService.captionSizeMultiplier == 1.3 ? 'Large (130%)' : 'X-Large (160%)',
+                  style: const TextStyle(color: AppTheme.textSecondary, fontSize: 12),
+                ),
+                onTap: () => _showSubtitleSettings(context, dbService),
               ),
               _divider(),
-              _infotile(
+              _actiontile(
                 icon: Icons.hd_rounded,
-                label: 'Video Quality',
-                trailing: const Text('Auto', style: TextStyle(color: AppTheme.textSecondary, fontSize: 12)),
+                label: 'Default Video Quality',
+                trailing: Text(dbService.defaultQuality, style: const TextStyle(color: AppTheme.textSecondary, fontSize: 12)),
+                onTap: () => _showQualitySettings(context, dbService),
               ),
-            ]),
+              _divider(),
+              _actiontile(
+                icon: Icons.speed_rounded,
+                label: 'Playback Speed Rate',
+                trailing: Text('${dbService.playbackSpeed}x', style: const TextStyle(color: AppTheme.textSecondary, fontSize: 12)),
+                onTap: () => _showSpeedSettings(context, dbService),
+              ),
+              _divider(),
+              _switchTile(
+                icon: Icons.play_circle_outline_rounded,
+                label: 'Auto-play Next Episodes',
+                value: dbService.autoPlayNext,
+                onChanged: (v) => dbService.toggleAutoPlay(v),
+              ),
+            ]).animate().fade(duration: 500.ms, delay: 150.ms).slideY(begin: 0.1, end: 0, curve: Curves.easeOutQuad),
 
             const SizedBox(height: 20),
 
-            // ─── Notifications ───────────────────────────
-            _sectionLabel('Notifications'),
+            // ─── Alerts Preferences ────────────────────────
+            _sectionLabel('Notifications & Alerts'),
             _settingsCard([
               _switchTile(
                 icon: Icons.notifications_rounded,
@@ -200,97 +399,91 @@ class SettingsScreen extends StatelessWidget {
                 value: dbService.notifTrending,
                 onChanged: (v) => dbService.toggleNotifTrending(v),
               ),
-            ]),
+            ]).animate().fade(duration: 550.ms, delay: 200.ms).slideY(begin: 0.1, end: 0, curve: Curves.easeOutQuad),
 
             const SizedBox(height: 20),
 
-            // ─── Premium Section ───────────────────────────
-            _sectionLabel('Premium'),
-            _premiumCard(context, dbService),
+            // ─── Premium Membership card ──────────────────
+            _sectionLabel('Premium License'),
+            _premiumCard(context, dbService).animate().fade(duration: 600.ms, delay: 250.ms).slideY(begin: 0.1, end: 0, curve: Curves.easeOutQuad),
 
             const SizedBox(height: 20),
 
-            // ─── Storage & Privacy ───────────────────────────
-            _sectionLabel('Storage & Privacy'),
+            // ─── Storage Operations ───────────────────────
+            _sectionLabel('Storage Operations'),
             _settingsCard([
               _actiontile(
                 icon: Icons.delete_sweep_rounded,
-                label: 'Clear Watch History',
+                label: 'Clear TMDB Cache Box',
+                color: AppTheme.accent,
+                onTap: () => _clearCache(context, tmdbService),
+              ),
+              _divider(),
+              _actiontile(
+                icon: Icons.video_label_rounded,
+                label: 'Delete All Offline Downloads',
                 color: Colors.orangeAccent,
-                onTap: () async {
-                  final confirmed = await showDialog<bool>(
-                    context: context,
-                    builder: (ctx) => AlertDialog(
-                      backgroundColor: AppTheme.surface,
-                      title: const Text('Clear History', style: TextStyle(color: Colors.white)),
-                      content: const Text(
-                        'This will delete your entire watch history for the current profile.',
-                        style: TextStyle(color: AppTheme.textSecondary),
-                      ),
-                      actions: [
-                        TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel', style: TextStyle(color: AppTheme.textSecondary))),
-                        TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Clear', style: TextStyle(color: Colors.redAccent))),
-                      ],
-                    ),
-                  );
-                  if (confirmed == true && context.mounted) {
-                    dbService.clearDatabase();
-                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Watch history cleared.')));
-                  }
-                },
+                onTap: () => _purgeAllDownloads(context, dbService),
               ),
               _divider(),
               _actiontile(
                 icon: Icons.playlist_remove_rounded,
-                label: 'Reset Watchlist & Stats',
+                label: 'Reset Profile Watchlist & History',
                 color: Colors.redAccent,
                 onTap: () async {
                   final confirmed = await showDialog<bool>(
                     context: context,
                     builder: (ctx) => AlertDialog(
                       backgroundColor: AppTheme.surface,
-                      title: const Text('Reset Everything', style: TextStyle(color: Colors.white)),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                      title: const Text('Reset Everything', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
                       content: const Text(
-                        'This will delete your watchlist, watch history, and all stats permanently.',
-                        style: TextStyle(color: AppTheme.textSecondary),
+                        'This will delete your watchlist, history list, and stats for this profile permanently. Local downloads remain untouched.',
+                        style: TextStyle(color: AppTheme.textSecondary, fontSize: 13, height: 1.4),
                       ),
                       actions: [
-                        TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel', style: TextStyle(color: AppTheme.textSecondary))),
-                        TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Reset All', style: TextStyle(color: Colors.redAccent))),
+                        TextButton(
+                          onPressed: () => Navigator.pop(ctx, false),
+                          child: const Text('Cancel', style: TextStyle(color: AppTheme.textSecondary)),
+                        ),
+                        TextButton(
+                          onPressed: () => Navigator.pop(ctx, true),
+                          child: const Text('Reset All', style: TextStyle(color: Colors.redAccent, fontWeight: FontWeight.bold)),
+                        ),
                       ],
                     ),
                   );
                   if (confirmed == true && context.mounted) {
                     dbService.clearDatabase();
-                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('All data reset.')));
+                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Watch preferences and stats reset.')));
                   }
                 },
               ),
-            ]),
+            ]).animate().fade(duration: 650.ms, delay: 300.ms).slideY(begin: 0.1, end: 0, curve: Curves.easeOutQuad),
 
             const SizedBox(height: 20),
 
-            // ─── About ───────────────────────────
-            _sectionLabel('About'),
+            // ─── About Info ───────────────────────────────
+            _sectionLabel('About CineSync'),
             _settingsCard([
               _infotile(
                 icon: Icons.info_outline_rounded,
-                label: 'App Version',
-                trailing: const Text('1.2.0', style: TextStyle(color: AppTheme.textSecondary, fontSize: 12)),
+                label: 'App Release Version',
+                trailing: const Text('2.0.0 Premium', style: TextStyle(color: AppTheme.textSecondary, fontSize: 12, fontWeight: FontWeight.bold)),
               ),
               _divider(),
               _infotile(
                 icon: Icons.movie_filter_rounded,
-                label: 'App Name',
-                trailing: const Text('StreamSync', style: TextStyle(color: AppTheme.textSecondary, fontSize: 12)),
+                label: 'API Core Platform',
+                trailing: const Text('TMDB V3 Engine', style: TextStyle(color: AppTheme.textSecondary, fontSize: 12)),
               ),
               _divider(),
               _infotile(
                 icon: Icons.copyright_rounded,
-                label: 'Powered by',
-                trailing: const Text('TMDB API', style: TextStyle(color: AppTheme.textSecondary, fontSize: 12)),
+                label: 'Build Status',
+                trailing: const Text('Clean Sandbox', style: TextStyle(color: AppTheme.textSecondary, fontSize: 12)),
               ),
-            ]),
+            ]).animate().fade(duration: 700.ms, delay: 350.ms).slideY(begin: 0.1, end: 0, curve: Curves.easeOutQuad),
 
             const SizedBox(height: 80),
           ],
@@ -303,12 +496,12 @@ class SettingsScreen extends StatelessWidget {
 
   Widget _sectionLabel(String label) {
     return Padding(
-      padding: const EdgeInsets.only(left: 4, bottom: 8),
+      padding: const EdgeInsets.only(left: 4, bottom: 8, top: 4),
       child: Text(
         label.toUpperCase(),
         style: const TextStyle(
           color: AppTheme.textSecondary,
-          fontSize: 11,
+          fontSize: 10,
           fontWeight: FontWeight.bold,
           letterSpacing: 1.2,
         ),
@@ -317,13 +510,63 @@ class SettingsScreen extends StatelessWidget {
   }
 
   Widget _settingsCard(List<Widget> children) {
-    return Container(
-      decoration: BoxDecoration(
-        color: AppTheme.surface,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.white12),
-      ),
+    return GlassCard(
+      borderRadius: 16,
+      padding: EdgeInsets.zero,
       child: Column(children: children),
+    );
+  }
+
+  Widget _statCard({
+    required String title,
+    required String value,
+    required String subtitle,
+    required IconData icon,
+    required Color iconColor,
+  }) {
+    return GlassCard(
+      borderRadius: 16,
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      child: Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              color: iconColor.withValues(alpha: 0.1),
+              shape: BoxShape.circle,
+            ),
+            child: Icon(icon, color: iconColor, size: 20),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Text(
+                  value,
+                  style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.bold),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  title,
+                  style: const TextStyle(color: Colors.white70, fontSize: 10, fontWeight: FontWeight.w600),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                Text(
+                  subtitle,
+                  style: const TextStyle(color: AppTheme.textSecondary, fontSize: 8),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -333,15 +576,15 @@ class SettingsScreen extends StatelessWidget {
     required Widget trailing,
   }) {
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 13),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
       child: Row(
         children: [
-          Icon(icon, color: Colors.white54, size: 18),
+          Icon(icon, color: Colors.white38, size: 18),
           const SizedBox(width: 14),
           Expanded(
             child: Text(
               label,
-              style: const TextStyle(color: Colors.white, fontSize: 14),
+              style: const TextStyle(color: Colors.white70, fontSize: 13, fontWeight: FontWeight.w500),
             ),
           ),
           trailing,
@@ -361,15 +604,19 @@ class SettingsScreen extends StatelessWidget {
       onTap: onTap,
       borderRadius: BorderRadius.circular(16),
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 13),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
         child: Row(
           children: [
-            Icon(icon, color: color == Colors.white ? Colors.white54 : color, size: 18),
+            Icon(icon, color: color == Colors.white ? Colors.white38 : color, size: 18),
             const SizedBox(width: 14),
             Expanded(
               child: Text(
                 label,
-                style: TextStyle(color: color == Colors.white ? Colors.white : color, fontSize: 14),
+                style: TextStyle(
+                  color: color == Colors.white ? Colors.white : color,
+                  fontSize: 13,
+                  fontWeight: color == Colors.white ? FontWeight.w500 : FontWeight.bold,
+                ),
               ),
             ),
             trailing ?? const Icon(Icons.chevron_right_rounded, color: Colors.white24, size: 18),
@@ -389,14 +636,50 @@ class SettingsScreen extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       child: Row(
         children: [
-          Icon(icon, color: Colors.white54, size: 18),
+          Icon(icon, color: Colors.white38, size: 18),
           const SizedBox(width: 14),
-          Expanded(child: Text(label, style: const TextStyle(color: Colors.white, fontSize: 14))),
-          Switch(
-            value: value,
-            onChanged: onChanged,
-            activeColor: AppTheme.accent,
-            activeTrackColor: AppTheme.accent.withAlpha(60),
+          Expanded(
+            child: Text(
+              label,
+              style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w500),
+            ),
+          ),
+          GestureDetector(
+            onTap: () => onChanged(!value),
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 250),
+              width: 44,
+              height: 24,
+              padding: const EdgeInsets.all(2.5),
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(12),
+                color: value ? AppTheme.accent.withValues(alpha: 0.2) : Colors.white.withValues(alpha: 0.06),
+                border: Border.all(
+                  color: value ? AppTheme.accent : Colors.white.withValues(alpha: 0.12),
+                  width: 1.0,
+                ),
+              ),
+              child: AnimatedAlign(
+                duration: const Duration(milliseconds: 250),
+                alignment: value ? Alignment.centerRight : Alignment.centerLeft,
+                child: Container(
+                  width: 17,
+                  height: 17,
+                  decoration: BoxDecoration(
+                    color: value ? AppTheme.accent : Colors.white54,
+                    shape: BoxShape.circle,
+                    boxShadow: value
+                        ? [
+                            BoxShadow(
+                              color: AppTheme.accent.withValues(alpha: 0.5),
+                              blurRadius: 4,
+                            )
+                          ]
+                        : null,
+                  ),
+                ),
+              ),
+            ),
           ),
         ],
       ),
@@ -406,7 +689,7 @@ class SettingsScreen extends StatelessWidget {
   Widget _divider() {
     return const Padding(
       padding: EdgeInsets.symmetric(horizontal: 16),
-      child: Divider(height: 1, color: Colors.white12),
+      child: Divider(height: 1, color: Colors.white10),
     );
   }
 
@@ -416,57 +699,59 @@ class SettingsScreen extends StatelessWidget {
       decoration: BoxDecoration(
         gradient: LinearGradient(
           colors: isPremium
-              ? [const Color(0xFF1a3a2a), const Color(0xFF0d1f16)]
-              : [const Color(0xFF2a1a00), const Color(0xFF1a1000)],
+              ? [const Color(0xFF0F261C), const Color(0xFF07120D)]
+              : [const Color(0xFF281E10), const Color(0xFF130E07)],
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
         ),
         borderRadius: BorderRadius.circular(16),
         border: Border.all(
-          color: isPremium ? Colors.tealAccent.withAlpha(60) : AppTheme.secondaryAccent.withAlpha(80),
+          color: isPremium ? Colors.tealAccent.withValues(alpha: 0.25) : AppTheme.secondaryAccent.withValues(alpha: 0.3),
           width: 1,
         ),
       ),
-      padding: const EdgeInsets.all(20),
+      padding: const EdgeInsets.all(18),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
               Icon(
-                isPremium ? Icons.verified_rounded : Icons.workspace_premium_rounded,
+                isPremium ? Icons.verified_user_rounded : Icons.workspace_premium_rounded,
                 color: isPremium ? Colors.tealAccent : AppTheme.secondaryAccent,
-                size: 28,
+                size: 26,
               ),
               const SizedBox(width: 12),
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    isPremium ? 'Premium Pro Active' : 'StreamSync Premium',
-                    style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 15),
-                  ),
-                  Text(
-                    isPremium ? 'Lifetime license • Ad-free' : 'Lifetime access for \$1.99',
-                    style: TextStyle(
-                      color: isPremium ? Colors.tealAccent.withAlpha(200) : AppTheme.secondaryAccent.withAlpha(200),
-                      fontSize: 12,
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      isPremium ? 'Premium Pro Member' : 'Unlock Premium Access',
+                      style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14),
                     ),
-                  ),
-                ],
+                    Text(
+                      isPremium ? 'Lifetime License Activated • No Ads' : 'Secure sandbox checkout simulator',
+                      style: TextStyle(
+                        color: isPremium ? Colors.tealAccent.withValues(alpha: 0.75) : AppTheme.secondaryAccent.withValues(alpha: 0.75),
+                        fontSize: 11,
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ],
           ),
           if (!isPremium) ...[
-            const SizedBox(height: 16),
+            const SizedBox(height: 14),
             const Wrap(
-              spacing: 8,
-              runSpacing: 6,
+              spacing: 6,
+              runSpacing: 4,
               children: [
-                _BenefitChip('No Ads'),
-                _BenefitChip('All Regions'),
-                _BenefitChip('Sync History'),
-                _BenefitChip('Priority Support'),
+                _BenefitChip('No Ad-rolls'),
+                _BenefitChip('Global Servers'),
+                _BenefitChip('Sync Data'),
+                _BenefitChip('Sandboxed'),
               ],
             ),
             const SizedBox(height: 16),
@@ -476,12 +761,14 @@ class SettingsScreen extends StatelessWidget {
                 onPressed: () => _showCheckoutSheet(context, dbService),
                 style: ElevatedButton.styleFrom(
                   backgroundColor: AppTheme.secondaryAccent,
-                  padding: const EdgeInsets.symmetric(vertical: 14),
+                  foregroundColor: Colors.black,
+                  elevation: 0,
+                  padding: const EdgeInsets.symmetric(vertical: 12),
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                 ),
                 child: const Text(
-                  'Upgrade Now — \$1.99 Lifetime',
-                  style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold, fontSize: 13),
+                  'Launch Sandbox Upgrader',
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
                 ),
               ),
             ),
@@ -490,9 +777,9 @@ class SettingsScreen extends StatelessWidget {
             TextButton(
               onPressed: () {
                 dbService.togglePremium();
-                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Reverted to free plan.')));
+                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Membership deactivated (sandbox).')));
               },
-              child: const Text('Restore Free Plan', style: TextStyle(color: Colors.white38, fontSize: 12)),
+              child: const Text('Restore Free Access tier', style: TextStyle(color: Colors.white24, fontSize: 11, decoration: TextDecoration.underline)),
             ),
           ],
         ],
@@ -522,49 +809,79 @@ class SettingsScreen extends StatelessWidget {
                 Container(width: 40, height: 4, decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(2))),
                 const SizedBox(height: 20),
                 if (!isProcessing && !isSuccess) ...[
-                  const Text('Upgrade to Premium Pro', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 18)),
-                  const SizedBox(height: 8),
-                  const Text('Lifetime ad-free access, region unlock, and cross-device sync.', textAlign: TextAlign.center, style: TextStyle(color: AppTheme.textSecondary, fontSize: 12)),
+                  const Icon(Icons.security_rounded, color: AppTheme.accent, size: 40),
+                  const SizedBox(height: 12),
+                  const Text('Secure Checkout Simulator', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16)),
+                  const SizedBox(height: 6),
+                  const Text('This is a sandboxed payment verification gate designed for Play Store verification testing.', textAlign: TextAlign.center, style: TextStyle(color: AppTheme.textSecondary, fontSize: 11, height: 1.4)),
                   const SizedBox(height: 20),
                   Container(
                     padding: const EdgeInsets.all(16),
-                    decoration: BoxDecoration(color: Colors.white.withAlpha(8), borderRadius: BorderRadius.circular(12), border: Border.all(color: Colors.white12)),
-                    child: const Column(children: [
-                      Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-                        Text('StreamSync Premium (Lifetime)', style: TextStyle(color: Colors.white, fontSize: 13)),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withValues(alpha: 0.03),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: Colors.white.withValues(alpha: 0.06)),
+                    ),
+                    child: const Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text('CineSync Pro (Lifetime license)', style: TextStyle(color: Colors.white70, fontSize: 12, fontWeight: FontWeight.bold)),
                         Text('\$1.99', style: TextStyle(color: AppTheme.accent, fontWeight: FontWeight.bold, fontSize: 13)),
-                      ]),
-                    ]),
+                      ],
+                    ),
                   ),
-                  const SizedBox(height: 16),
+                  const SizedBox(height: 20),
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton.icon(
+                      onPressed: () {
+                        setModalState(() => isProcessing = true);
+                        Future.delayed(const Duration(seconds: 2), () {
+                          setModalState(() {
+                            isProcessing = false;
+                            isSuccess = true;
+                          });
+                          dbService.togglePremium();
+                        });
+                      },
+                      icon: const Icon(Icons.shopping_bag_rounded, size: 16, color: Colors.black),
+                      label: const Text('Authorize Sandbox Purchase', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.black)),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: AppTheme.secondaryAccent,
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                      ),
+                    ),
+                  ),
+                ] else if (isProcessing) ...[
+                  const SizedBox(height: 40),
+                  const CircularProgressIndicator(color: AppTheme.accent),
+                  const SizedBox(height: 20),
+                  const Text('Authorizing Sandbox Transaction...', style: TextStyle(color: Colors.white70, fontSize: 13, fontWeight: FontWeight.w600)),
+                  const SizedBox(height: 40),
+                ] else ...[
+                  const Icon(Icons.check_circle_rounded, color: Colors.greenAccent, size: 56),
+                  const SizedBox(height: 14),
+                  const Text('Transaction Authorized!', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16)),
+                  const SizedBox(height: 6),
+                  const Text('Premium membership enabled. Watch Ads-free natively.', textAlign: TextAlign.center, style: TextStyle(color: AppTheme.textSecondary, fontSize: 11)),
+                  const SizedBox(height: 24),
                   SizedBox(
                     width: double.infinity,
                     child: ElevatedButton(
                       onPressed: () {
-                        setModalState(() => isProcessing = true);
-                        Future.delayed(const Duration(seconds: 2), () {
-                          setModalState(() { isProcessing = false; isSuccess = true; });
-                          dbService.togglePremium();
-                        });
+                        Navigator.pop(context);
+                        _loadMetrics();
                       },
-                      style: ElevatedButton.styleFrom(backgroundColor: AppTheme.secondaryAccent, padding: const EdgeInsets.symmetric(vertical: 14), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))),
-                      child: const Text('Pay via Google Play', style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: AppTheme.accent,
+                        foregroundColor: Colors.black,
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                      ),
+                      child: const Text('Return to settings', style: TextStyle(fontWeight: FontWeight.bold)),
                     ),
                   ),
-                ] else if (isProcessing) ...[
-                  const SizedBox(height: 32),
-                  const CircularProgressIndicator(valueColor: AlwaysStoppedAnimation(AppTheme.accent)),
-                  const SizedBox(height: 16),
-                  const Text('Processing Payment...', style: TextStyle(color: Colors.white, fontSize: 14)),
-                  const SizedBox(height: 32),
-                ] else ...[
-                  const Icon(Icons.check_circle_rounded, color: Colors.greenAccent, size: 64),
-                  const SizedBox(height: 12),
-                  const Text('Payment Successful! 🎉', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 18)),
-                  const SizedBox(height: 8),
-                  const Text('Welcome to StreamSync Premium Pro. Ads removed.', textAlign: TextAlign.center, style: TextStyle(color: AppTheme.textSecondary, fontSize: 12)),
-                  const SizedBox(height: 20),
-                  TextButton(onPressed: () => Navigator.pop(context), child: const Text('Done', style: TextStyle(color: AppTheme.accent))),
                 ],
               ],
             ),
@@ -586,7 +903,7 @@ class SettingsScreen extends StatelessWidget {
     showModalBottomSheet(
       context: context,
       backgroundColor: AppTheme.surface,
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
       builder: (context) {
         return Padding(
           padding: const EdgeInsets.symmetric(vertical: 20),
@@ -619,6 +936,116 @@ class SettingsScreen extends StatelessWidget {
       },
     );
   }
+
+  void _showSubtitleSettings(BuildContext context, DatabaseService dbService) {
+    final sizes = [
+      {'label': 'Small (80%)', 'value': 0.8},
+      {'label': 'Medium (100%)', 'value': 1.0},
+      {'label': 'Large (130%)', 'value': 1.3},
+      {'label': 'X-Large (160%)', 'value': 1.6},
+    ];
+
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: AppTheme.surface,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (context) {
+        return Padding(
+          padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(width: 40, height: 4, decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(2))),
+              const SizedBox(height: 16),
+              const Text('Subtitle Scale', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16)),
+              const SizedBox(height: 12),
+              ...sizes.map((size) {
+                final isSelected = dbService.captionSizeMultiplier == size['value'];
+                return ListTile(
+                  title: Text(size['label'] as String, style: const TextStyle(color: Colors.white, fontSize: 14)),
+                  trailing: isSelected ? const Icon(Icons.check_circle_rounded, color: AppTheme.accent) : null,
+                  onTap: () {
+                    dbService.updateCaptionSize(size['value'] as double);
+                    Navigator.pop(context);
+                  },
+                );
+              }),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  void _showQualitySettings(BuildContext context, DatabaseService dbService) {
+    final qualities = ['Auto', '1080p', '720p', '480p'];
+
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: AppTheme.surface,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (context) {
+        return Padding(
+          padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(width: 40, height: 4, decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(2))),
+              const SizedBox(height: 16),
+              const Text('Default Video Quality', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16)),
+              const SizedBox(height: 12),
+              ...qualities.map((q) {
+                final isSelected = dbService.defaultQuality == q;
+                return ListTile(
+                  title: Text(q, style: const TextStyle(color: Colors.white, fontSize: 14)),
+                  trailing: isSelected ? const Icon(Icons.check_circle_rounded, color: AppTheme.accent) : null,
+                  onTap: () {
+                    dbService.updateQuality(q);
+                    Navigator.pop(context);
+                  },
+                );
+              }),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  void _showSpeedSettings(BuildContext context, DatabaseService dbService) {
+    final speeds = [0.5, 0.75, 1.0, 1.25, 1.5, 2.0];
+
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: AppTheme.surface,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (context) {
+        return Padding(
+          padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(width: 40, height: 4, decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(2))),
+              const SizedBox(height: 16),
+              const Text('Playback Speed', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16)),
+              const SizedBox(height: 12),
+              ...speeds.map((s) {
+                final isSelected = dbService.playbackSpeed == s;
+                return ListTile(
+                  title: Text('${s}x', style: const TextStyle(color: Colors.white, fontSize: 14)),
+                  trailing: isSelected ? const Icon(Icons.check_circle_rounded, color: AppTheme.accent) : null,
+                  onTap: () {
+                    dbService.updatePlaybackSpeed(s);
+                    Navigator.pop(context);
+                  },
+                );
+              }),
+            ],
+          ),
+        );
+      },
+    );
+  }
 }
 
 class _BenefitChip extends StatelessWidget {
@@ -628,15 +1055,15 @@ class _BenefitChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       decoration: BoxDecoration(
-        color: AppTheme.secondaryAccent.withAlpha(30),
+        color: AppTheme.secondaryAccent.withValues(alpha: 0.1),
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: AppTheme.secondaryAccent.withAlpha(60)),
+        border: Border.all(color: AppTheme.secondaryAccent.withValues(alpha: 0.2)),
       ),
       child: Text(
         '✓ $label',
-        style: const TextStyle(color: AppTheme.secondaryAccent, fontSize: 11, fontWeight: FontWeight.w600),
+        style: const TextStyle(color: AppTheme.secondaryAccent, fontSize: 10, fontWeight: FontWeight.w600),
       ),
     );
   }

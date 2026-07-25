@@ -1,0 +1,7 @@
+- [/] Advanced Media Player & Premium UI Redesign
+    - [ ] Implement Smart Gestures (Single/Double Tap) and Auto-hide Controls
+    - [ ] Enhance Ad/Popup Blocking with JS Injection
+    - [ ] Redesign `DetailsScreen` "Watch Now" and Hero sections
+    - [ ] Redesign `StreamPlayerScreen` Portrait Control Center
+    - [ ] Add seek animations and visual feedback
+- [ ] Verify all changes across different orientations

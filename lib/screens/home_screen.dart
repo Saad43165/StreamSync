@@ -14,7 +14,7 @@ import 'upcoming_releases_screen.dart';
 import 'watch_history_screen.dart';
 import 'settings_screen.dart';
 import 'login_screen.dart';
-import 'watchlist_screen.dart';
+import 'downloads_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -126,21 +126,9 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
         ),
         title: const Text(
-          'StreamSync',
+          'CineSync',
           style: TextStyle(fontWeight: FontWeight.bold, letterSpacing: 1.5, fontSize: 20),
         ),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.bookmark_rounded, color: Colors.white70),
-            tooltip: 'My Watchlist',
-            onPressed: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(builder: (_) => const WatchlistScreen()),
-              );
-            },
-          ),
-        ],
       ),
       body: RefreshIndicator(
         onRefresh: () async {
@@ -208,6 +196,24 @@ class _HomeScreenState extends State<HomeScreen> {
               tmdbService.isLoading
                   ? ShimmerLoadingPresets.horizontalPostersSkeleton()
                   : _buildHorizontalSection(context, items: tmdbService.series),
+
+              const SizedBox(height: 24),
+
+              // Bollywood Hits Section
+              _buildSectionTitle(context, 'Bollywood Blockbusters', key: GlobalKey(), items: tmdbService.bollywood),
+              const SizedBox(height: 12),
+              tmdbService.isLoading
+                  ? ShimmerLoadingPresets.horizontalPostersSkeleton()
+                  : _buildHorizontalSection(context, items: tmdbService.bollywood),
+
+              const SizedBox(height: 24),
+
+              // Pakistani Dramas & Movies Section
+              _buildSectionTitle(context, 'Pakistani Dramas & Movies', key: GlobalKey(), items: tmdbService.pakistani),
+              const SizedBox(height: 12),
+              tmdbService.isLoading
+                  ? ShimmerLoadingPresets.horizontalPostersSkeleton()
+                  : _buildHorizontalSection(context, items: tmdbService.pakistani),
 
               const SizedBox(height: 24),
 
@@ -300,9 +306,9 @@ class _HomeScreenState extends State<HomeScreen> {
                         Container(
                           padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                           decoration: BoxDecoration(
-                            color: Colors.greenAccent.withOpacity(0.15),
+                            color: Colors.greenAccent.withValues(alpha: 0.15),
                             borderRadius: BorderRadius.circular(6),
-                            border: Border.all(color: Colors.greenAccent.withOpacity(0.3)),
+                            border: Border.all(color: Colors.greenAccent.withValues(alpha: 0.3)),
                           ),
                           child: const Text(
                             'NO COST',
@@ -396,7 +402,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 },
                 child: Text(
                   'Clear All',
-                  style: TextStyle(color: Colors.white.withOpacity(0.4), fontSize: 12),
+                  style: TextStyle(color: Colors.white.withValues(alpha: 0.4), fontSize: 12),
                 ),
               ),
             ],
@@ -656,8 +662,8 @@ class _HomeScreenState extends State<HomeScreen> {
                   fontWeight: FontWeight.w600,
                 ),
               ),
-              backgroundColor: Colors.white.withOpacity(0.04),
-              side: BorderSide(color: Colors.white.withOpacity(0.08)),
+              backgroundColor: Colors.white.withValues(alpha: 0.04),
+              side: BorderSide(color: Colors.white.withValues(alpha: 0.08)),
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(20),
               ),
@@ -839,7 +845,7 @@ class _HomeScreenState extends State<HomeScreen> {
       child: GlassCard(
         margin: const EdgeInsets.fromLTRB(16, 90, 16, 0), // Adjusted top margin to fit translucent appBar
         padding: const EdgeInsets.all(12),
-        borderColor: Colors.yellowAccent.withOpacity(0.2),
+        borderColor: Colors.yellowAccent.withValues(alpha: 0.2),
         child: Row(
           children: [
             const Icon(Icons.warning_amber_rounded, color: Colors.yellowAccent, size: 28),
@@ -855,7 +861,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   const SizedBox(height: 2),
                   Text(
                     'Enter a free TMDB API key in config.dart to unlock live global streams and search.',
-                    style: TextStyle(color: Colors.white.withOpacity(0.7), fontSize: 11),
+                    style: TextStyle(color: Colors.white.withValues(alpha: 0.7), fontSize: 11),
                   ),
                 ],
               ),
@@ -969,7 +975,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 decoration: BoxDecoration(
                   color: Colors.black54,
                   borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: AppTheme.secondaryAccent.withOpacity(0.3)),
+                  border: Border.all(color: AppTheme.secondaryAccent.withValues(alpha: 0.3)),
                 ),
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
@@ -1304,6 +1310,13 @@ class _HomeScreenState extends State<HomeScreen> {
                         label: 'Watch History',
                         iconColor: Colors.lightBlueAccent,
                         onTap: () => navTo(const WatchHistoryScreen()),
+                      ),
+
+                      _drawerItem(
+                        icon: Icons.download_for_offline_rounded,
+                        label: 'Offline Downloads',
+                        iconColor: Colors.greenAccent,
+                        onTap: () => navTo(const DownloadsScreen()),
                       ),
 
                       const Padding(

@@ -40,19 +40,20 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
       final bool hasSeenOnboarding = prefs.getBool('streamsync_seen_onboarding') ?? false;
 
       if (!mounted) return;
+      
       Widget nextScreen;
       if (dbService.isLoggedIn) {
         // Already logged in → go straight home
         nextScreen = const MainNavigationShell();
       } else if (!hasSeenOnboarding) {
-        // First time ever → show login with skip option, mark as seen
-        await prefs.setBool('streamsync_seen_onboarding', true);
+        // First time ever → show login with skip option
         nextScreen = const LoginScreen(showSkipButton: true);
       } else {
-        // Has seen onboarding before but chose to skip → go straight home
+        // Has seen onboarding before (either logged in or skipped) → go straight home
         nextScreen = const MainNavigationShell();
       }
 
+      if (!mounted) return;
       Navigator.pushReplacement(
         context,
         PageRouteBuilder(
@@ -76,67 +77,113 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: AppTheme.background,
-      body: Center(
-        child: FadeTransition(
-          opacity: _fadeAnimation,
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              // Glowing Logo Container
-              Container(
-                width: 130,
-                height: 130,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  border: Border.all(color: AppTheme.accent.withOpacity(0.4), width: 2),
-                  boxShadow: [
-                    BoxShadow(
-                      color: AppTheme.accent.withOpacity(0.2),
-                      blurRadius: 20,
-                      spreadRadius: 5,
+      body: Stack(
+        children: [
+          Center(
+            child: FadeTransition(
+              opacity: _fadeAnimation,
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  // Glowing Logo Container
+                  Container(
+                    width: 130,
+                    height: 130,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      border: Border.all(color: AppTheme.accent.withValues(alpha: 0.4), width: 2),
+                      boxShadow: [
+                        BoxShadow(
+                          color: AppTheme.accent.withValues(alpha: 0.2),
+                          blurRadius: 20,
+                          spreadRadius: 5,
+                        ),
+                      ],
+                    ),
+                    child: ClipOval(
+                      child: Image.asset(
+                        'assets/app_icon.jpg',
+                        fit: BoxFit.cover,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 24),
+                  // App Name Text
+                  const Text(
+                    'CineSync',
+                    style: TextStyle(
+                      fontSize: 32,
+                      fontWeight: FontWeight.bold,
+                      letterSpacing: 2.0,
+                      color: AppTheme.textPrimary,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  const Text(
+                    'Synchronized Media & Streaming Mirror Player',
+                    style: TextStyle(
+                      fontSize: 12,
+                      letterSpacing: 0.5,
+                      color: AppTheme.textSecondary,
+                    ),
+                  ),
+                  const SizedBox(height: 48),
+                  // Breathing minimal indicator
+                  const SizedBox(
+                    width: 24,
+                    height: 24,
+                    child: CircularProgressIndicator(
+                      color: AppTheme.accent,
+                      strokeWidth: 2.0,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          
+          // Professional Attribution Footer
+          Positioned(
+            bottom: 40,
+            left: 0,
+            right: 0,
+            child: FadeTransition(
+              opacity: _fadeAnimation,
+              child: Center(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      'DEVELOPED BY',
+                      style: TextStyle(
+                        fontSize: 9,
+                        letterSpacing: 2.5,
+                        color: Colors.white.withValues(alpha: 0.35),
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const SizedBox(height: 5),
+                    Text(
+                      'SAAD IKRAM',
+                      style: TextStyle(
+                        fontSize: 13,
+                        letterSpacing: 1.5,
+                        color: AppTheme.accent.withValues(alpha: 0.85),
+                        fontWeight: FontWeight.w800,
+                        shadows: [
+                          Shadow(
+                            color: AppTheme.accent.withValues(alpha: 0.25),
+                            blurRadius: 8,
+                          ),
+                        ],
+                      ),
                     ),
                   ],
                 ),
-                child: ClipOval(
-                  child: Image.asset(
-                    'assets/app_icon.jpg',
-                    fit: BoxFit.cover,
-                  ),
-                ),
               ),
-              const SizedBox(height: 24),
-              // App Name Text
-              const Text(
-                'StreamSync',
-                style: TextStyle(
-                  fontSize: 32,
-                  fontWeight: FontWeight.bold,
-                  letterSpacing: 2.0,
-                  color: AppTheme.textPrimary,
-                ),
-              ),
-              const SizedBox(height: 8),
-              const Text(
-                'Unlimited Free Movies & TV Series',
-                style: TextStyle(
-                  fontSize: 13,
-                  letterSpacing: 0.5,
-                  color: AppTheme.textSecondary,
-                ),
-              ),
-              const SizedBox(height: 48),
-              // Breathing minimal indicator
-              const SizedBox(
-                width: 24,
-                height: 24,
-                child: CircularProgressIndicator(
-                  color: AppTheme.accent,
-                  strokeWidth: 2.0,
-                ),
-              ),
-            ],
+            ),
           ),
-        ),
+        ],
       ),
     );
   }

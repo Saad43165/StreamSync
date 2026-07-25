@@ -1,10 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../services/database_service.dart';
-import '../services/tmdb_service.dart';
 import '../theme/app_theme.dart';
 import 'login_screen.dart';
 import 'settings_screen.dart';
+import 'watchlist_screen.dart';
+import 'downloads_screen.dart';
 
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
@@ -14,176 +15,9 @@ class ProfileScreen extends StatefulWidget {
 }
 
 class _ProfileScreenState extends State<ProfileScreen> {
-  // Simulates the premium checkout purchase process
-  void _showSimulatedCheckout(BuildContext context, DatabaseService dbService) {
-    bool isProcessing = false;
-    bool isSuccess = false;
-
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: AppTheme.surface,
-      isScrollControlled: true,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (context) {
-        return StatefulBuilder(
-          builder: (context, setModalState) {
-            return Padding(
-              padding: EdgeInsets.only(
-                top: 20,
-                left: 20,
-                right: 20,
-                bottom: MediaQuery.of(context).viewInsets.bottom + 20,
-              ),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Center(
-                    child: Container(
-                      width: 40,
-                      height: 4,
-                      decoration: BoxDecoration(
-                        color: Colors.white24,
-                        borderRadius: BorderRadius.circular(2),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                  if (!isProcessing && !isSuccess) ...[
-                    const Text(
-                      'Upgrade to Premium Pro',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.white,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    const Text(
-                      'Get lifetime access to ad-free viewing, premium stats tracking, and custom region synchronization.',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: AppTheme.textSecondary,
-                      ),
-                    ),
-                    const SizedBox(height: 20),
-                    Container(
-                      padding: const EdgeInsets.all(16),
-                      decoration: BoxDecoration(
-                        color: Colors.white.withOpacity(0.04),
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(color: Colors.white12),
-                      ),
-                      child: const Column(
-                        children: [
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                            children: [
-                              Text('Product:', style: TextStyle(color: Colors.white70, fontSize: 13)),
-                              Text('StreamSync Pro (Lifetime)', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13)),
-                            ],
-                          ),
-                          SizedBox(height: 8),
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                            children: [
-                              Text('Price:', style: TextStyle(color: Colors.white70, fontSize: 13)),
-                              Text('\$1.99 USD', style: TextStyle(color: AppTheme.accent, fontWeight: FontWeight.bold, fontSize: 13)),
-                            ],
-                          ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(height: 20),
-                    ElevatedButton(
-                      onPressed: () {
-                        setModalState(() {
-                          isProcessing = true;
-                        });
-                        // Simulate network call
-                        Future.delayed(const Duration(seconds: 2), () {
-                          setModalState(() {
-                            isProcessing = false;
-                            isSuccess = true;
-                          });
-                          dbService.togglePremium(); // Unlock premium
-                        });
-                      },
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: AppTheme.secondaryAccent,
-                        padding: const EdgeInsets.symmetric(vertical: 14),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                      ),
-                      child: const Text(
-                        'Pay \$1.99 via Google Play',
-                        style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold, fontSize: 14),
-                      ),
-                    ),
-                  ] else if (isProcessing) ...[
-                    const SizedBox(height: 40),
-                    const Center(
-                      child: CircularProgressIndicator(
-                        valueColor: AlwaysStoppedAnimation<Color>(AppTheme.accent),
-                      ),
-                    ),
-                    const SizedBox(height: 20),
-                    const Text(
-                      'Processing Transaction...',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w500),
-                    ),
-                    const SizedBox(height: 40),
-                  ] else if (isSuccess) ...[
-                    const SizedBox(height: 20),
-                    const Center(
-                      child: Icon(
-                        Icons.check_circle_outline_rounded,
-                        color: Colors.greenAccent,
-                        size: 64,
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-                    const Text(
-                      'Payment Successful! 🎉',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold),
-                    ),
-                    const SizedBox(height: 8),
-                    const Text(
-                      'You are now upgraded to StreamSync Premium Pro. All ads have been removed.',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(color: AppTheme.textSecondary, fontSize: 12),
-                    ),
-                    const SizedBox(height: 24),
-                    ElevatedButton(
-                      onPressed: () {
-                        Navigator.pop(context);
-                      },
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.white12,
-                        padding: const EdgeInsets.symmetric(vertical: 12),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                      ),
-                      child: const Text('Back to Profile', style: TextStyle(color: Colors.white)),
-                    ),
-                  ],
-                ],
-              ),
-            );
-          },
-        );
-      },
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     final dbService = Provider.of<DatabaseService>(context);
-    final tmdbService = Provider.of<TMDBService>(context, listen: false);
 
     Color themeColor = Colors.purpleAccent;
     if (dbService.currentProfile == 'Family') themeColor = Colors.blueAccent;
@@ -192,200 +26,261 @@ class _ProfileScreenState extends State<ProfileScreen> {
     return Scaffold(
       backgroundColor: AppTheme.background,
       appBar: AppBar(
-        title: const Text('Profiles & Settings', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
+        title: const Text('My Space', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: Colors.white)),
         backgroundColor: Colors.transparent,
         elevation: 0,
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.settings_rounded, color: Colors.white70),
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const SettingsScreen()),
+              );
+            },
+          ),
+        ],
       ),
       body: SingleChildScrollView(
+        physics: const BouncingScrollPhysics(),
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16.0),
+          padding: const EdgeInsets.symmetric(horizontal: 20.0, vertical: 10),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               // 1. Sleek Active Profile Visual Card / Login display
               Container(
                 width: double.infinity,
-                padding: const EdgeInsets.all(16),
+                padding: const EdgeInsets.all(20),
                 decoration: BoxDecoration(
-                  color: AppTheme.surface,
-                  borderRadius: BorderRadius.circular(16),
-                  border: Border.all(color: themeColor.withOpacity(0.15)),
+                  gradient: LinearGradient(
+                    colors: [AppTheme.surface, const Color(0xFF16151B)],
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                  ),
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(color: themeColor.withValues(alpha: 0.15)),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.3),
+                      blurRadius: 10,
+                      offset: const Offset(0, 4),
+                    ),
+                  ],
                 ),
-                child: Row(
+                child: Column(
                   children: [
-                    CircleAvatar(
-                      radius: 28,
-                      backgroundColor: themeColor,
-                      child: Text(
-                        dbService.isLoggedIn 
-                            ? dbService.username.substring(0, 1).toUpperCase()
-                            : dbService.currentProfile.substring(0, 1),
-                        style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: Colors.white),
-                      ),
-                    ),
-                    const SizedBox(width: 16),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            dbService.isLoggedIn ? dbService.username : dbService.currentProfile,
-                            style: const TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.bold,
-                              color: AppTheme.textPrimary,
+                    Row(
+                      children: [
+                        CircleAvatar(
+                          radius: 32,
+                          backgroundColor: themeColor.withValues(alpha: 0.2),
+                          child: CircleAvatar(
+                            radius: 28,
+                            backgroundColor: themeColor,
+                            child: Text(
+                              dbService.isLoggedIn 
+                                  ? dbService.username.substring(0, 1).toUpperCase()
+                                  : dbService.currentProfile.substring(0, 1),
+                              style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: Colors.white),
                             ),
                           ),
-                          const SizedBox(height: 2),
-                          Text(
-                            dbService.isLoggedIn ? dbService.email : (dbService.isPremium ? '💎 Premium Pro Active' : 'Free Watcher'),
-                            style: TextStyle(
-                              color: dbService.isPremium ? AppTheme.accent : AppTheme.textSecondary,
-                              fontSize: 12,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    if (dbService.isLoggedIn)
-                      TextButton.icon(
-                        onPressed: () {
-                          dbService.logout();
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(content: Text('Logged out successfully.')),
-                          );
-                        },
-                        icon: const Icon(Icons.logout_rounded, color: Colors.white54, size: 16),
-                        label: const Text('Logout', style: TextStyle(color: Colors.white54, fontSize: 12)),
-                      )
-                    else
-                      ElevatedButton(
-                        onPressed: () {
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(builder: (context) => const LoginScreen(showSkipButton: false)),
-                          );
-                        },
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: AppTheme.accent,
-                          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-                          minimumSize: Size.zero,
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                         ),
-                        child: const Text('Login / Sign Up', style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold, fontSize: 11)),
-                      ),
+                        const SizedBox(width: 16),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                dbService.isLoggedIn ? dbService.username : dbService.currentProfile,
+                                style: const TextStyle(
+                                  fontSize: 18,
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.white,
+                                ),
+                              ),
+                              const SizedBox(height: 4),
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                decoration: BoxDecoration(
+                                  color: dbService.isPremium 
+                                      ? Colors.amber.withValues(alpha: 0.15) 
+                                      : Colors.white10,
+                                  borderRadius: BorderRadius.circular(6),
+                                ),
+                                child: Text(
+                                  dbService.isPremium ? '👑 PREMIUM PRO MEMBER' : 'FREE ACCOUNT',
+                                  style: TextStyle(
+                                    color: dbService.isPremium ? Colors.amberAccent : Colors.white60,
+                                    fontSize: 9,
+                                    fontWeight: FontWeight.bold,
+                                    letterSpacing: 0.8,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        if (dbService.isLoggedIn)
+                          IconButton(
+                            onPressed: () {
+                              dbService.logout();
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(content: Text('Logged out successfully.')),
+                              );
+                            },
+                            icon: const Icon(Icons.logout_rounded, color: Colors.redAccent, size: 20),
+                            tooltip: 'Logout',
+                          )
+                        else
+                          ElevatedButton(
+                            onPressed: () {
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(builder: (context) => const LoginScreen(showSkipButton: false)),
+                              );
+                            },
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: AppTheme.accent,
+                              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                              minimumSize: Size.zero,
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                            ),
+                            child: const Text('Sign In', style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold, fontSize: 11)),
+                          ),
+                      ],
+                    ),
+                    const SizedBox(height: 20),
+                    const Divider(color: Colors.white12, height: 1),
+                    const SizedBox(height: 16),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceAround,
+                      children: [
+                        _buildStatItem('${dbService.watchlist.length}', 'Watchlist'),
+                        _buildStatSeparator(),
+                        _buildStatItem('${dbService.watchHistory.length}', 'Watched'),
+                        _buildStatSeparator(),
+                        _buildStatItem('${dbService.downloads.length}', 'Downloads'),
+                      ],
+                    ),
                   ],
                 ),
               ),
 
               const SizedBox(height: 24),
 
-              // 2. Compact Profile Switcher List
+              // 2. Profile switcher dashboard row
               const Text(
-                'Switch Profile',
-                style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: AppTheme.textPrimary),
+                'Profiles',
+                style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.white70, letterSpacing: 0.8),
               ),
-              const SizedBox(height: 10),
-              Container(
-                padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
-                decoration: BoxDecoration(
-                  color: AppTheme.surface,
-                  borderRadius: BorderRadius.circular(16),
-                  border: Border.all(color: Colors.white.withOpacity(0.04)),
-                ),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                  children: dbService.profiles.map((profile) {
-                    final isCurrent = dbService.currentProfile == profile;
-                    Color profileColor = Colors.purpleAccent;
-                    if (profile == 'Family') profileColor = Colors.blueAccent;
-                    if (profile == 'Kids') profileColor = Colors.greenAccent;
+              const SizedBox(height: 12),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: dbService.profiles.map((profile) {
+                  final isCurrent = dbService.currentProfile == profile;
+                  Color profileColor = Colors.purpleAccent;
+                  if (profile == 'Family') profileColor = Colors.blueAccent;
+                  if (profile == 'Kids') profileColor = Colors.greenAccent;
 
-                    return GestureDetector(
+                  return Expanded(
+                    child: GestureDetector(
                       onTap: () {
                         dbService.selectProfile(profile);
                         ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(content: Text('Switched profile to $profile')),
+                          SnackBar(
+                            backgroundColor: profileColor,
+                            content: Text('Switched workspace profile to $profile successfully.'),
+                          ),
                         );
                       },
-                      child: Opacity(
-                        opacity: isCurrent ? 1.0 : 0.6,
+                      child: Container(
+                        margin: const EdgeInsets.symmetric(horizontal: 4),
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                        decoration: BoxDecoration(
+                          color: isCurrent ? profileColor.withValues(alpha: 0.1) : AppTheme.surface,
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(
+                            color: isCurrent ? profileColor : Colors.white.withValues(alpha: 0.05),
+                            width: 1.5,
+                          ),
+                        ),
                         child: Column(
                           children: [
                             CircleAvatar(
-                              radius: 20,
+                              radius: 18,
                               backgroundColor: profileColor,
                               child: Text(
                                 profile.substring(0, 1),
-                                style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
+                                style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.bold),
                               ),
                             ),
-                            const SizedBox(height: 6),
+                            const SizedBox(height: 8),
                             Text(
                               profile,
                               style: TextStyle(
                                 color: isCurrent ? Colors.white : AppTheme.textSecondary,
-                                fontSize: 11,
+                                fontSize: 12,
                                 fontWeight: isCurrent ? FontWeight.bold : FontWeight.normal,
                               ),
                             ),
                           ],
                         ),
                       ),
-                    );
-                  }).toList(),
-                ),
+                    ),
+                  );
+                }).toList(),
               ),
 
               const SizedBox(height: 24),
 
-              // 3. Quick Actions → Settings
-              GestureDetector(
-                onTap: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(builder: (_) => SettingsScreen()),
-                  );
-                },
-                child: Container(
-                  decoration: BoxDecoration(
-                    color: AppTheme.surface,
-                    borderRadius: BorderRadius.circular(16),
-                    border: Border.all(color: Colors.white12),
-                  ),
-                  child: Column(
-                    children: [
-                      _profileQuickTile(
-                        icon: Icons.settings_rounded,
-                        label: 'Settings',
-                        subtitle: 'Region, notifications, privacy',
-                        iconColor: Colors.white60,
-                      ),
-                      const Padding(
-                        padding: EdgeInsets.symmetric(horizontal: 16),
-                        child: Divider(height: 1, color: Colors.white12),
-                      ),
-                      _profileQuickTile(
-                        icon: Icons.language_rounded,
-                        label: 'Streaming Region',
-                        subtitle: dbService.selectedCountry == 'US' ? '🇺🇸 United States' :
-                                  dbService.selectedCountry == 'IN' ? '🇮🇳 India' :
-                                  dbService.selectedCountry == 'GB' ? '🇬🇧 United Kingdom' :
-                                  dbService.selectedCountry == 'CA' ? '🇨🇦 Canada' : '🇦🇺 Australia',
-                        iconColor: Colors.blueAccent,
-                      ),
-                      const Padding(
-                        padding: EdgeInsets.symmetric(horizontal: 16),
-                        child: Divider(height: 1, color: Colors.white12),
-                      ),
-                      _profileQuickTile(
-                        icon: Icons.history_rounded,
-                        label: 'Watch History',
-                        subtitle: '${dbService.watchHistory.length} titles watched',
-                        iconColor: Colors.lightBlueAccent,
-                      ),
-                    ],
-                  ),
+              // 3. User Space Shortcut Items
+              const Text(
+                'My Shortcuts',
+                style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.white70, letterSpacing: 0.8),
+              ),
+              const SizedBox(height: 12),
+              Container(
+                decoration: BoxDecoration(
+                  color: AppTheme.surface,
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: Colors.white12),
+                ),
+                child: Column(
+                  children: [
+                    _profileNavTile(
+                      context: context,
+                      icon: Icons.bookmark_rounded,
+                      label: 'Watchlist Library',
+                      subtitle: 'Manage saved movies and shows',
+                      iconColor: AppTheme.accent,
+                      targetScreen: const WatchlistScreen(),
+                    ),
+                    const Padding(
+                      padding: EdgeInsets.symmetric(horizontal: 16),
+                      child: Divider(height: 1, color: Colors.white10),
+                    ),
+                    _profileNavTile(
+                      context: context,
+                      icon: Icons.download_for_offline_rounded,
+                      label: 'Offline Downloads',
+                      subtitle: 'Cached movies & series file storage',
+                      iconColor: Colors.greenAccent,
+                      targetScreen: const DownloadsScreen(),
+                    ),
+                    const Padding(
+                      padding: EdgeInsets.symmetric(horizontal: 16),
+                      child: Divider(height: 1, color: Colors.white10),
+                    ),
+                    _profileNavTile(
+                      context: context,
+                      icon: Icons.history_rounded,
+                      label: 'Watch History',
+                      subtitle: 'Resume recently watched episodes',
+                      iconColor: Colors.blueAccent,
+                      targetScreen: const SettingsScreen(),
+                    ),
+                  ],
                 ),
               ),
 
@@ -394,7 +289,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
               // 4. Premium Status Card
               _buildPremiumCard(context, dbService),
 
-              const SizedBox(height: 80),
+              const SizedBox(height: 40),
             ],
           ),
         ),
@@ -402,37 +297,73 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
-  Widget _profileQuickTile({
+  Widget _buildStatItem(String val, String label) {
+    return Column(
+      children: [
+        Text(
+          val,
+          style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          label,
+          style: const TextStyle(color: AppTheme.textSecondary, fontSize: 11),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildStatSeparator() {
+    return Container(
+      width: 1,
+      height: 24,
+      color: Colors.white12,
+    );
+  }
+
+  Widget _profileNavTile({
+    required BuildContext context,
     required IconData icon,
     required String label,
     required String subtitle,
-    Color iconColor = Colors.white70,
+    required Color iconColor,
+    required Widget targetScreen,
   }) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-      child: Row(
-        children: [
-          Container(
-            width: 36,
-            height: 36,
-            decoration: BoxDecoration(
-              color: iconColor.withAlpha(20),
-              borderRadius: BorderRadius.circular(10),
+    return InkWell(
+      onTap: () {
+        Navigator.push(
+          context,
+          MaterialPageRoute(builder: (_) => targetScreen),
+        );
+      },
+      borderRadius: BorderRadius.circular(16),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+        child: Row(
+          children: [
+            Container(
+              width: 38,
+              height: 38,
+              decoration: BoxDecoration(
+                color: iconColor.withValues(alpha: 0.15),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Icon(icon, color: iconColor, size: 20),
             ),
-            child: Icon(icon, color: iconColor, size: 18),
-          ),
-          const SizedBox(width: 14),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(label, style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w600)),
-                Text(subtitle, style: const TextStyle(color: AppTheme.textSecondary, fontSize: 11)),
-              ],
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(label, style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 2),
+                  Text(subtitle, style: const TextStyle(color: AppTheme.textSecondary, fontSize: 11)),
+                ],
+              ),
             ),
-          ),
-          const Icon(Icons.chevron_right_rounded, color: Colors.white24, size: 16),
-        ],
+            const Icon(Icons.chevron_right_rounded, color: Colors.white24, size: 18),
+          ],
+        ),
       ),
     );
   }
@@ -443,14 +374,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
       decoration: BoxDecoration(
         gradient: LinearGradient(
           colors: isPremium
-              ? [const Color(0xFF1a3a2a), const Color(0xFF0d1f16)]
-              : [const Color(0xFF2a1a00), const Color(0xFF1a1000)],
+              ? [const Color(0xFF132F20), const Color(0xFF0A1911)]
+              : [const Color(0xFF33220E), const Color(0xFF1C1207)],
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
         ),
         borderRadius: BorderRadius.circular(16),
         border: Border.all(
-          color: isPremium ? Colors.tealAccent.withAlpha(60) : AppTheme.secondaryAccent.withAlpha(80),
+          color: isPremium ? Colors.tealAccent.withValues(alpha: 0.2) : AppTheme.secondaryAccent.withValues(alpha: 0.25),
         ),
       ),
       padding: const EdgeInsets.all(18),
@@ -470,7 +401,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   isPremium ? 'Premium Pro Active' : 'Upgrade to Premium',
                   style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14),
                 ),
-                const SizedBox(height: 3),
+                const SizedBox(height: 4),
                 Text(
                   isPremium ? 'Lifetime license · Ad-free browsing' : 'Lifetime access for only \$1.99',
                   style: const TextStyle(color: AppTheme.textSecondary, fontSize: 11),
@@ -483,7 +414,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
             onPressed: () {
               Navigator.push(
                 context,
-                MaterialPageRoute(builder: (_) => SettingsScreen()),
+                MaterialPageRoute(builder: (_) => const SettingsScreen()),
               );
             },
             style: ElevatedButton.styleFrom(

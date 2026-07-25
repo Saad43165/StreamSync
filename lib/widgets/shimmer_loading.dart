@@ -144,7 +144,7 @@ class ShimmerLoadingPresets {
       itemBuilder: (context, index) {
         return Container(
           decoration: BoxDecoration(
-            color: Colors.white.withOpacity(0.04),
+            color: Colors.white.withValues(alpha: 0.04),
             borderRadius: BorderRadius.circular(12),
           ),
           child: Column(

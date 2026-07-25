@@ -1,13 +1,14 @@
 import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
 
 class AppTheme {
   // Theme Colors
-  static const Color background = Color(0xFF0C0F14); // Deep Midnight Blue
-  static const Color surface = Color(0xFF1E222B);    // Elevated Card surface
-  static const Color accent = Color(0xFFE50914);     // Cinematic Red (like Netflix)
-  static const Color secondaryAccent = Color(0xFFFFB800); // Premium Gold for ratings
+  static const Color background = Color(0xFF050408); // Obsidian Black
+  static const Color surface = Color(0xFF13111A);    // Midnight Violet surface
+  static const Color accent = Color(0xFF00E5FF);     // Premium Neon Teal
+  static const Color secondaryAccent = Color(0xFF8B5CF6); // Premium Neon Violet
   static const Color textPrimary = Color(0xFFFFFFFF);
-  static const Color textSecondary = Color(0xFF8A8E99);
+  static const Color textSecondary = Color(0xFF8E8A99);
 
   // Gradient definitions for glassmorphic elements
   static const LinearGradient cardGradient = LinearGradient(
@@ -19,18 +20,31 @@ class AppTheme {
     end: Alignment.bottomRight,
   );
 
-  // Universal Ambient Backdrop Gradient (Indigo to Charcoal)
+  // Universal Ambient Backdrop Gradient (Deep Obsidian to Midnight Violet)
   static const RadialGradient backgroundGradient = RadialGradient(
-    center: Alignment(-0.3, -0.5),
-    radius: 1.6,
+    center: Alignment(0.0, -0.3),
+    radius: 1.5,
     colors: [
-      Color(0xFF1C2230), // Cosmic Navy Indigo
-      Color(0xFF090B0F), // Deep Midnight Charcoal
+      Color(0xFF0E0C16), // Midnight Violet
+      Color(0xFF050408), // Deep Obsidian
     ],
   );
 
+  static BoxDecoration glassDecoration({
+    double radius = 16,
+    double opacity = 0.08,
+    Color borderColor = Colors.white12,
+  }) {
+    return BoxDecoration(
+      color: Colors.white.withAlpha((opacity * 255).toInt()),
+      borderRadius: BorderRadius.circular(radius),
+      border: Border.all(color: borderColor, width: 1),
+    );
+  }
+
   static ThemeData get darkTheme {
-    return ThemeData.dark().copyWith(
+    final baseTheme = ThemeData.dark();
+    return baseTheme.copyWith(
       scaffoldBackgroundColor: Colors.transparent, // transparent to show ambient gradient
       colorScheme: const ColorScheme.dark(
         primary: accent,
@@ -38,30 +52,40 @@ class AppTheme {
         surface: surface,
         error: Colors.redAccent,
       ),
-      textTheme: const TextTheme(
-        headlineLarge: TextStyle(
-          fontSize: 28,
-          fontWeight: FontWeight.bold,
-          color: textPrimary,
-          letterSpacing: -0.5,
+      textTheme: GoogleFonts.outfitTextTheme(baseTheme.textTheme).copyWith(
+        headlineLarge: GoogleFonts.outfit(
+          textStyle: const TextStyle(
+            fontSize: 28,
+            fontWeight: FontWeight.bold,
+            color: textPrimary,
+            letterSpacing: -0.5,
+          ),
         ),
-        headlineMedium: TextStyle(
-          fontSize: 22,
-          fontWeight: FontWeight.bold,
-          color: textPrimary,
+        headlineMedium: GoogleFonts.outfit(
+          textStyle: const TextStyle(
+            fontSize: 22,
+            fontWeight: FontWeight.bold,
+            color: textPrimary,
+          ),
         ),
-        titleLarge: TextStyle(
-          fontSize: 18,
-          fontWeight: FontWeight.w600,
-          color: textPrimary,
+        titleLarge: GoogleFonts.outfit(
+          textStyle: const TextStyle(
+            fontSize: 18,
+            fontWeight: FontWeight.w600,
+            color: textPrimary,
+          ),
         ),
-        bodyLarge: TextStyle(
-          fontSize: 16,
-          color: textPrimary,
+        bodyLarge: GoogleFonts.outfit(
+          textStyle: const TextStyle(
+            fontSize: 16,
+            color: textPrimary,
+          ),
         ),
-        bodyMedium: TextStyle(
-          fontSize: 14,
-          color: textSecondary,
+        bodyMedium: GoogleFonts.outfit(
+          textStyle: const TextStyle(
+            fontSize: 14,
+            color: textSecondary,
+          ),
         ),
       ),
       cardTheme: const CardThemeData(

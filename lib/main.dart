@@ -3,20 +3,30 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'theme/app_theme.dart';
 
+import 'package:hive_flutter/hive_flutter.dart';
 import 'services/tmdb_service.dart';
 import 'services/database_service.dart';
+import 'services/download_service.dart';
 import 'screens/home_screen.dart';
 import 'screens/search_screen.dart';
 import 'screens/watchlist_screen.dart';
 import 'screens/profile_screen.dart';
 import 'screens/splash_screen.dart';
+import 'widgets/floating_download_widget.dart';
 
-void main() {
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await Hive.initFlutter();
+  await Hive.openBox('tmdb_cache_box');
   runApp(
     MultiProvider(
       providers: [
         ChangeNotifierProvider(create: (_) => TMDBService()),
         ChangeNotifierProvider(create: (_) => DatabaseService()),
+        ChangeNotifierProxyProvider<DatabaseService, DownloadService>(
+          create: (context) => DownloadService(dbService: Provider.of<DatabaseService>(context, listen: false)),
+          update: (context, dbService, previous) => previous ?? DownloadService(dbService: dbService),
+        ),
       ],
       child: const StreamSyncApp(),
     ),
@@ -84,15 +94,15 @@ class _MainNavigationShellState extends State<MainNavigationShell> {
                   child: Container(
                     padding: const EdgeInsets.symmetric(vertical: 4),
                     decoration: BoxDecoration(
-                      color: AppTheme.surface.withOpacity(0.8),
+                      color: AppTheme.surface.withValues(alpha: 0.8),
                       borderRadius: BorderRadius.circular(24),
                       border: Border.all(
-                        color: Colors.white.withOpacity(0.08),
+                        color: Colors.white.withValues(alpha: 0.08),
                         width: 1.0,
                       ),
                       boxShadow: [
                         BoxShadow(
-                          color: Colors.black.withOpacity(0.4),
+                          color: Colors.black.withValues(alpha: 0.4),
                           blurRadius: 16,
                           offset: const Offset(0, 4),
                         ),
@@ -140,6 +150,9 @@ class _MainNavigationShellState extends State<MainNavigationShell> {
               ),
             ),
           ),
+          
+          // Floating background download manager
+          const FloatingDownloadWidget(),
         ],
       ),
     );

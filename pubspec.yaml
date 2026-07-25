@@ -15,6 +15,15 @@ dependencies:
   url_launcher: ^6.3.2
   youtube_player_flutter: ^8.1.2
   flutter_inappwebview: ^5.8.0
+  google_fonts: ^6.2.1
+  flutter_animate: ^4.5.0
+  cached_network_image: ^3.3.1
+  hive: ^2.2.3
+  hive_flutter: ^1.1.0
+  screen_brightness: ^1.0.1
+  flutter_volume_controller: ^2.0.1
+  dio: ^5.4.0
+  path_provider: ^2.1.2
 
 dev_dependencies:
   flutter_test:

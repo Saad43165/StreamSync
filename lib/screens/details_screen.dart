@@ -1,10 +1,12 @@
 import 'dart:ui';
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import '../services/tmdb_service.dart';
 import '../services/database_service.dart';
+import '../services/download_service.dart';
 import '../theme/app_theme.dart';
 import '../widgets/glass_card.dart';
 import '../widgets/shimmer_loading.dart';
@@ -27,6 +29,9 @@ class DetailsScreen extends StatefulWidget {
 class _DetailsScreenState extends State<DetailsScreen> {
   Map<String, dynamic>? _details;
   bool _isLoading = true;
+
+  // Stability: GlobalKey for trailer webview
+  final GlobalKey _trailerKey = GlobalKey();
 
   // TV Selector variables
   int _selectedSeason = 1;
@@ -140,13 +145,15 @@ class _DetailsScreenState extends State<DetailsScreen> {
   Widget build(BuildContext context) {
     if (_isLoading) {
       return const Scaffold(
+        backgroundColor: AppTheme.background,
         body: Center(child: CircularProgressIndicator(color: AppTheme.accent)),
       );
     }
 
     if (_details == null) {
       return const Scaffold(
-        body: Center(child: Text('Failed to load details.')),
+        backgroundColor: AppTheme.background,
+        body: Center(child: Text('Failed to load details.', style: TextStyle(color: Colors.white))),
       );
     }
 
@@ -156,6 +163,7 @@ class _DetailsScreenState extends State<DetailsScreen> {
     final voteAverage = (details['vote_average'] as num?)?.toDouble() ?? 0.0;
     final rating = voteAverage.toStringAsFixed(1);
     final releaseDate = details['release_date'] ?? 'N/A';
+    final releaseYear = releaseDate.split('-').first;
     final freeOptions = details['free_options'] as List<dynamic>;
     final subOptions = details['subscription_options'] as List<dynamic>;
     final genresList = details['genres'] as List<dynamic>? ?? [];
@@ -165,6 +173,7 @@ class _DetailsScreenState extends State<DetailsScreen> {
     final trailerId = details['trailer_id'];
 
     return Scaffold(
+      backgroundColor: AppTheme.background,
       body: Stack(
         children: [
           // 1. Dynamic Blurred Backdrop Canvas
@@ -177,9 +186,19 @@ class _DetailsScreenState extends State<DetailsScreen> {
                 ),
               ),
               child: BackdropFilter(
-                filter: ImageFilter.blur(sigmaX: 30, sigmaY: 30),
+                filter: ImageFilter.blur(sigmaX: 25, sigmaY: 25),
                 child: Container(
-                  color: AppTheme.background.withOpacity(0.85),
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      colors: [
+                        Colors.black.withOpacity(0.4),
+                        AppTheme.background.withOpacity(0.8),
+                        AppTheme.background,
+                      ],
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                    ),
+                  ),
                 ),
               ),
             ),
@@ -188,23 +207,26 @@ class _DetailsScreenState extends State<DetailsScreen> {
           // 2. Scrollable details content
           SafeArea(
             child: SingleChildScrollView(
+              physics: const BouncingScrollPhysics(),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   _buildCustomAppBar(context, details),
 
-                  // 3. YouTube Direct iframe Video Player Webview
-                  if (trailerId != null)
+                  // 3. YouTube Direct iframe Video Player Webview (Auto-pauses when screen is pushed underneath player)
+                  if (trailerId != null && (ModalRoute.of(context)?.isCurrent ?? true))
                     Container(
                       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                      height: 220,
+                      height: 210,
                       decoration: BoxDecoration(
                         borderRadius: BorderRadius.circular(16),
-                        boxShadow: const [BoxShadow(color: Colors.black45, blurRadius: 12)],
+                        border: Border.all(color: Colors.white10),
+                        boxShadow: const [BoxShadow(color: Colors.black54, blurRadius: 15, offset: Offset(0, 5))],
                       ),
                       child: ClipRRect(
-                        borderRadius: BorderRadius.circular(16),
+                        borderRadius: BorderRadius.circular(15),
                         child: InAppWebView(
+                          key: _trailerKey,
                           initialUrlRequest: URLRequest(
                             url: Uri.parse('https://www.youtube-nocookie.com/embed/$trailerId?autoplay=1&mute=1&playsinline=1&rel=0'),
                           ),
@@ -214,6 +236,7 @@ class _DetailsScreenState extends State<DetailsScreen> {
                               transparentBackground: true,
                               javaScriptEnabled: true,
                               userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                              cacheEnabled: true,
                             ),
                             android: AndroidInAppWebViewOptions(
                               useHybridComposition: true,
@@ -226,63 +249,85 @@ class _DetailsScreenState extends State<DetailsScreen> {
                   else
                     _buildBackdropFallback(backdropUrl),
 
-                  const SizedBox(height: 12),
+                  const SizedBox(height: 16),
 
-                  // 4. WATCH STREAM ON DEMAND ROW
-                  _buildWatchStreamButton(context, details),
-
+                  // 4. Title, rating and metadata tags
                   Padding(
-                    padding: const EdgeInsets.all(20.0),
+                    padding: const EdgeInsets.symmetric(horizontal: 20),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
+                        Text(
+                          title,
+                          style: const TextStyle(
+                            fontSize: 28,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.white,
+                            letterSpacing: 0.5,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
                         Row(
                           children: [
                             Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                               decoration: BoxDecoration(
-                                color: AppTheme.surface,
-                                borderRadius: BorderRadius.circular(8),
-                                border: Border.all(color: AppTheme.secondaryAccent.withOpacity(0.3)),
+                                color: AppTheme.secondaryAccent.withOpacity(0.15),
+                                borderRadius: BorderRadius.circular(6),
                               ),
                               child: Row(
                                 children: [
-                                  const Icon(Icons.star, color: AppTheme.secondaryAccent, size: 14),
+                                  const Icon(Icons.star_rounded, color: AppTheme.secondaryAccent, size: 16),
                                   const SizedBox(width: 4),
                                   Text(
                                     rating,
-                                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
+                                    style: const TextStyle(color: AppTheme.secondaryAccent, fontWeight: FontWeight.bold, fontSize: 12),
                                   ),
                                 ],
                               ),
                             ),
                             const SizedBox(width: 12),
                             Text(
-                              'Released: $releaseDate',
-                              style: const TextStyle(color: AppTheme.textSecondary, fontSize: 13),
+                              releaseYear,
+                              style: const TextStyle(color: AppTheme.textSecondary, fontSize: 13, fontWeight: FontWeight.w500),
+                            ),
+                            const SizedBox(width: 12),
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                              decoration: BoxDecoration(
+                                border: Border.all(color: Colors.white30),
+                                borderRadius: BorderRadius.circular(4),
+                              ),
+                              child: const Text(
+                                'HD',
+                                style: TextStyle(color: Colors.white70, fontSize: 10, fontWeight: FontWeight.bold),
+                              ),
                             ),
                           ],
                         ),
-                        const SizedBox(height: 16),
+                      ],
+                    ),
+                  ),
 
-                        Text(
-                          title,
-                          style: Theme.of(context).textTheme.headlineLarge?.copyWith(
-                                fontSize: 26,
-                                fontWeight: FontWeight.bold,
-                              ),
-                        ),
-                        const SizedBox(height: 12),
+                  const SizedBox(height: 20),
 
+                  // 5. WATCH STREAM ON DEMAND ROW
+                  _buildWatchStreamButton(context, details),
+
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
                         // Dynamic Genre Badges
-                        if (genresList.isNotEmpty)
+                        if (genresList.isNotEmpty) ...[
                           Wrap(
                             spacing: 8,
                             runSpacing: 8,
                             children: genresList.map((genre) => _buildGenreBadge(genre)).toList(),
                           ),
-
-                        const SizedBox(height: 24),
+                          const SizedBox(height: 24),
+                        ],
 
                         // Watch Free Options
                         _buildWatchProvidersSection(
@@ -293,7 +338,7 @@ class _DetailsScreenState extends State<DetailsScreen> {
                           isFree: true,
                         ),
 
-                        const SizedBox(height: 20),
+                        const SizedBox(height: 24),
 
                         // Subscription Options
                         _buildWatchProvidersSection(
@@ -311,7 +356,7 @@ class _DetailsScreenState extends State<DetailsScreen> {
                           style: TextStyle(
                             fontSize: 18,
                             fontWeight: FontWeight.bold,
-                            color: AppTheme.textPrimary,
+                            color: Colors.white,
                           ),
                         ),
                         const SizedBox(height: 8),
@@ -320,7 +365,7 @@ class _DetailsScreenState extends State<DetailsScreen> {
                           style: const TextStyle(
                             fontSize: 14,
                             color: AppTheme.textSecondary,
-                            height: 1.45,
+                            height: 1.5,
                           ),
                         ),
 
@@ -343,7 +388,7 @@ class _DetailsScreenState extends State<DetailsScreen> {
 
     return Container(
       width: double.infinity,
-      margin: const EdgeInsets.fromLTRB(16, 4, 16, 8),
+      padding: const EdgeInsets.symmetric(horizontal: 20),
       child: Column(
         children: [
           if (isTv) _buildTvSelector(details),
@@ -369,7 +414,7 @@ class _DetailsScreenState extends State<DetailsScreen> {
                 ),
               );
             },
-            icon: const Icon(Icons.play_circle_fill_rounded, color: Colors.black, size: 24),
+            icon: const Icon(Icons.play_arrow_rounded, color: Colors.black, size: 28),
             label: Text(
               isTv 
                   ? 'Watch Season $_selectedSeason, Ep $_selectedEpisode Free'
@@ -377,18 +422,17 @@ class _DetailsScreenState extends State<DetailsScreen> {
               style: const TextStyle(
                 color: Colors.black,
                 fontWeight: FontWeight.bold,
-                fontSize: 14,
+                fontSize: 15,
               ),
             ),
             style: ElevatedButton.styleFrom(
               backgroundColor: AppTheme.accent,
               padding: const EdgeInsets.symmetric(vertical: 14),
-              minimumSize: const Size(double.infinity, 50),
+              minimumSize: const Size(double.infinity, 52),
               shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(14),
+                borderRadius: BorderRadius.circular(12),
               ),
-              shadowColor: AppTheme.accent.withOpacity(0.3),
-              elevation: 8,
+              elevation: 4,
             ),
           ),
         ],
@@ -511,25 +555,48 @@ class _DetailsScreenState extends State<DetailsScreen> {
           Consumer<DatabaseService>(
             builder: (context, dbService, child) {
               final isSaved = dbService.isInWatchlist(details['id']);
-              return IconButton(
-                icon: Icon(
-                  isSaved ? Icons.bookmark : Icons.bookmark_border,
-                  color: isSaved ? AppTheme.accent : Colors.white,
-                  size: 28,
-                ),
-                onPressed: () {
-                  if (isSaved) {
-                    dbService.removeFromWatchlist(details['id']);
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('Removed from Watchlist')),
-                    );
-                  } else {
-                    dbService.addToWatchlist(details);
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('Added to Watchlist')),
-                    );
-                  }
-                },
+              final isDownloaded = dbService.isDownloaded(details['id']);
+
+              return Row(
+                children: [
+                  IconButton(
+                    icon: Icon(
+                      isDownloaded ? Icons.download_done_rounded : Icons.download_rounded,
+                      color: isDownloaded ? Colors.greenAccent : Colors.white,
+                      size: 28,
+                    ),
+                    onPressed: () {
+                      if (isDownloaded) {
+                        dbService.removeDownload(details['id']);
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(content: Text('Removed from Offline Downloads')),
+                        );
+                      } else {
+                        _showDownloadOptionsDialog(context, dbService, details);
+                      }
+                    },
+                  ),
+                  IconButton(
+                    icon: Icon(
+                      isSaved ? Icons.bookmark : Icons.bookmark_border,
+                      color: isSaved ? AppTheme.accent : Colors.white,
+                      size: 28,
+                    ),
+                    onPressed: () {
+                      if (isSaved) {
+                        dbService.removeFromWatchlist(details['id']);
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(content: Text('Removed from Watchlist')),
+                        );
+                      } else {
+                        dbService.addToWatchlist(details);
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(content: Text('Added to Watchlist')),
+                        );
+                      }
+                    },
+                  ),
+                ],
               );
             },
           ),
@@ -542,9 +609,9 @@ class _DetailsScreenState extends State<DetailsScreen> {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
       decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.06),
+        color: Colors.white.withValues(alpha: 0.06),
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: Colors.white.withOpacity(0.1)),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.1)),
       ),
       child: Text(
         name,
@@ -607,7 +674,7 @@ class _DetailsScreenState extends State<DetailsScreen> {
       child: GlassCard(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
         borderRadius: 8,
-        borderColor: Colors.greenAccent.withOpacity(0.2),
+        borderColor: Colors.greenAccent.withValues(alpha: 0.2),
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -719,8 +786,8 @@ class _DetailsScreenState extends State<DetailsScreen> {
                   padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
                   borderRadius: 10,
                   borderColor: isFree 
-                      ? Colors.greenAccent.withOpacity(0.15) 
-                      : Colors.white.withOpacity(0.08),
+                      ? Colors.greenAccent.withValues(alpha: 0.15) 
+                      : Colors.white.withValues(alpha: 0.08),
                   child: Row(
                     children: [
                       ClipRRect(
@@ -775,6 +842,122 @@ class _DetailsScreenState extends State<DetailsScreen> {
           ),
         ),
       ],
+    );
+  }
+
+  void _showDownloadOptionsDialog(BuildContext parentContext, DatabaseService dbService, Map<String, dynamic> details) {
+    String selectedQuality = '1080p';
+    String selectedLanguage = 'English';
+    
+    // Get DownloadService from parent context so we can dispatch the job
+    final downloadService = Provider.of<DownloadService>(parentContext, listen: false);
+
+    showModalBottomSheet(
+      context: parentContext,
+      backgroundColor: AppTheme.surface,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (ctx, setModalState) {
+            return Padding(
+              padding: EdgeInsets.fromLTRB(20, 20, 20, MediaQuery.of(ctx).viewInsets.bottom + 20),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      const Icon(Icons.download_for_offline_rounded, color: AppTheme.accent, size: 24),
+                      const SizedBox(width: 10),
+                      const Expanded(
+                        child: Text(
+                          'Download Offline Media',
+                          style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold),
+                        ),
+                      ),
+                      IconButton(
+                        onPressed: () => Navigator.pop(context),
+                        icon: const Icon(Icons.close, color: Colors.white54),
+                      )
+                    ],
+                  ),
+                  const SizedBox(height: 20),
+
+                  const Text('Select Quality', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 10),
+                  Wrap(
+                    spacing: 10,
+                    children: ['4K UHD', '1080p', '720p', '480p'].map((q) {
+                      final isSel = selectedQuality == q;
+                      return ChoiceChip(
+                        label: Text(q),
+                        selected: isSel,
+                        onSelected: (val) {
+                          if (val) setModalState(() => selectedQuality = q);
+                        },
+                        selectedColor: AppTheme.accent,
+                        backgroundColor: Colors.white.withAlpha(5),
+                        labelStyle: TextStyle(color: isSel ? Colors.black : Colors.white70, fontWeight: FontWeight.bold, fontSize: 12),
+                      );
+                    }).toList(),
+                  ),
+                  const SizedBox(height: 20),
+                  
+                  const Text('Audio Track', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 10),
+                  Wrap(
+                    spacing: 10,
+                    children: ['English', 'Spanish', 'Hindi', 'French'].map((l) {
+                      final isSel = selectedLanguage == l;
+                      return ChoiceChip(
+                        label: Text(l),
+                        selected: isSel,
+                        onSelected: (val) {
+                          if (val) setModalState(() => selectedLanguage = l);
+                        },
+                        selectedColor: AppTheme.accent,
+                        backgroundColor: Colors.white.withAlpha(5),
+                        labelStyle: TextStyle(color: isSel ? Colors.black : Colors.white70, fontWeight: FontWeight.bold, fontSize: 12),
+                      );
+                    }).toList(),
+                  ),
+                  const SizedBox(height: 24),
+
+                  // Action Trigger
+                  ElevatedButton.icon(
+                    onPressed: () {
+                      Navigator.pop(context); // Dismiss dialog first
+                      
+                      // Dispatch background download
+                      downloadService.startDownload(
+                        details: details,
+                        selectedQuality: selectedQuality,
+                        selectedLanguage: selectedLanguage,
+                      );
+                      
+                      ScaffoldMessenger.of(parentContext).showSnackBar(
+                        const SnackBar(
+                          backgroundColor: Colors.greenAccent,
+                          content: Text('Download started in background!', style: TextStyle(color: Colors.black)),
+                        ),
+                      );
+                    },
+                    icon: const Icon(Icons.download_rounded, color: Colors.black),
+                    label: const Text('Start Download Now', style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppTheme.accent,
+                      minimumSize: const Size(double.infinity, 48),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                ],
+              ),
+            );
+          },
+        );
+      },
     );
   }
 }

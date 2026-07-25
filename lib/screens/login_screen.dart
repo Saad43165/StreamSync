@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../services/database_service.dart';
 import '../theme/app_theme.dart';
 import '../main.dart';
@@ -28,7 +29,7 @@ class _LoginScreenState extends State<LoginScreen> {
     super.dispose();
   }
 
-  void _submitAuth(DatabaseService dbService) {
+  void _submitAuth(DatabaseService dbService) async {
     if (_formKey.currentState!.validate()) {
       final username = _usernameController.text.trim();
       final email = _emailController.text.trim();
@@ -36,6 +37,10 @@ class _LoginScreenState extends State<LoginScreen> {
       // Simulate auth process
       dbService.login(username, email);
 
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool('streamsync_seen_onboarding', true);
+
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(_isSignUp ? 'Account created successfully! Welcome $username.' : 'Logged in successfully!')),
       );
@@ -183,7 +188,10 @@ class _LoginScreenState extends State<LoginScreen> {
                   if (widget.showSkipButton) ...[
                     const SizedBox(height: 16),
                     TextButton(
-                      onPressed: () {
+                      onPressed: () async {
+                        final prefs = await SharedPreferences.getInstance();
+                        await prefs.setBool('streamsync_seen_onboarding', true);
+                        if (!mounted) return;
                         Navigator.pushReplacement(
                           context,
                           MaterialPageRoute(builder: (context) => const MainNavigationShell()),

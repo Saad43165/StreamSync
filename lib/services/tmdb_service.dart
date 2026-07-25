@@ -1,14 +1,13 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
-import 'package:shared_preferences/shared_preferences.dart';
+import 'package:hive/hive.dart';
 import '../config/config.dart';
 
 class TMDBService extends ChangeNotifier {
   static const String _baseUrl = 'https://api.themoviedb.org/3';
   static const String imageBaseUrl = 'https://image.tmdb.org/t/p/w500';
   static const String backdropBaseUrl = 'https://image.tmdb.org/t/p/original';
-  static const String _trendingCacheKey = 'streamsync_trending_cache';
 
   bool _isLoading = false;
   bool get isLoading => _isLoading;
@@ -47,6 +46,12 @@ class TMDBService extends ChangeNotifier {
   List<dynamic> _upcoming = [];
   List<dynamic> get upcoming => _upcoming;
 
+  List<dynamic> _bollywood = [];
+  List<dynamic> get bollywood => _bollywood;
+
+  List<dynamic> _pakistani = [];
+  List<dynamic> get pakistani => _pakistani;
+
   List<dynamic> _searchResults = [];
   List<dynamic> get searchResults => _searchResults;
 
@@ -70,28 +75,68 @@ class TMDBService extends ChangeNotifier {
       _scifiMovies = _getMockSciFi();
       _horrorMovies = _getMockHorror();
       _upcoming = _getMockUpcoming();
+      _bollywood = _getMockMovies();
+      _pakistani = _getMockSeries();
       notifyListeners();
       return;
     }
 
+    // 1. Try loading cached category mappings from Hive for immediate layout rendering
+    try {
+      final cacheBox = Hive.box('tmdb_cache_box');
+      final cachedStr = cacheBox.get('categories_cache') as String?;
+      if (cachedStr != null) {
+        final decoded = json.decode(cachedStr) as Map<String, dynamic>;
+        _trending = decoded['trending'] ?? [];
+        _movies = decoded['movies'] ?? [];
+        _series = decoded['series'] ?? [];
+        _netflix = decoded['netflix'] ?? [];
+        _prime = decoded['prime'] ?? [];
+        _disney = decoded['disney'] ?? [];
+        _actionMovies = decoded['actionMovies'] ?? [];
+        _comedyMovies = decoded['comedyMovies'] ?? [];
+        _scifiMovies = decoded['scifiMovies'] ?? [];
+        _horrorMovies = decoded['horrorMovies'] ?? [];
+        _upcoming = decoded['upcoming'] ?? [];
+        _bollywood = decoded['bollywood'] ?? [];
+        _pakistani = decoded['pakistani'] ?? [];
+        notifyListeners();
+      }
+    } catch (e) {
+      debugPrint('Error reading Hive categories cache: $e');
+    }
+
     _setLoading(true);
     try {
-      // Fetch trending
-      final trendingRes = await http.get(Uri.parse('$_baseUrl/trending/all/day?api_key=${AppConfig.tmdbApiKey}'));
+      // 2. Fetch all components in parallel to drastically improve network performance
+      final responses = await Future.wait([
+        http.get(Uri.parse('$_baseUrl/trending/all/day?api_key=${AppConfig.tmdbApiKey}')),
+        http.get(Uri.parse('$_baseUrl/discover/movie?api_key=${AppConfig.tmdbApiKey}&sort_by=popularity.desc')),
+        http.get(Uri.parse('$_baseUrl/discover/tv?api_key=${AppConfig.tmdbApiKey}&sort_by=popularity.desc')),
+        http.get(Uri.parse('$_baseUrl/discover/movie?api_key=${AppConfig.tmdbApiKey}&with_watch_providers=8&watch_region=US&sort_by=popularity.desc')),
+        http.get(Uri.parse('$_baseUrl/discover/movie?api_key=${AppConfig.tmdbApiKey}&with_watch_providers=9&watch_region=US&sort_by=popularity.desc')),
+        http.get(Uri.parse('$_baseUrl/discover/movie?api_key=${AppConfig.tmdbApiKey}&with_watch_providers=337&watch_region=US&sort_by=popularity.desc')),
+        http.get(Uri.parse('$_baseUrl/discover/movie?api_key=${AppConfig.tmdbApiKey}&with_genres=28&sort_by=popularity.desc')),
+        http.get(Uri.parse('$_baseUrl/discover/movie?api_key=${AppConfig.tmdbApiKey}&with_genres=35&sort_by=popularity.desc')),
+        http.get(Uri.parse('$_baseUrl/discover/movie?api_key=${AppConfig.tmdbApiKey}&with_genres=878&sort_by=popularity.desc')),
+        http.get(Uri.parse('$_baseUrl/discover/movie?api_key=${AppConfig.tmdbApiKey}&with_genres=27&sort_by=popularity.desc')),
+        http.get(Uri.parse('$_baseUrl/movie/upcoming?api_key=${AppConfig.tmdbApiKey}')),
+        http.get(Uri.parse('$_baseUrl/discover/movie?api_key=${AppConfig.tmdbApiKey}&with_original_language=hi&sort_by=popularity.desc')),
+        http.get(Uri.parse('$_baseUrl/discover/tv?api_key=${AppConfig.tmdbApiKey}&with_original_language=ur&sort_by=popularity.desc')),
+      ]);
+
+      // 3. Process trending
+      final trendingRes = responses[0];
       if (trendingRes.statusCode == 200) {
         final data = json.decode(trendingRes.body);
         final results = data['results'] as List<dynamic>? ?? [];
         _trending = results.where((item) => 
           item['media_type'] == 'movie' || item['media_type'] == 'tv'
         ).toList();
-        final prefs = await SharedPreferences.getInstance();
-        await prefs.setString(_trendingCacheKey, trendingRes.body);
-      } else {
-        await _loadTrendingFromCache();
       }
 
-      // Fetch Movies Section
-      final moviesRes = await http.get(Uri.parse('$_baseUrl/discover/movie?api_key=${AppConfig.tmdbApiKey}&sort_by=popularity.desc'));
+      // 4. Process movies
+      final moviesRes = responses[1];
       if (moviesRes.statusCode == 200) {
         final data = json.decode(moviesRes.body);
         _movies = (data['results'] as List<dynamic>? ?? []).map((item) {
@@ -100,8 +145,8 @@ class TMDBService extends ChangeNotifier {
         }).toList();
       }
 
-      // Fetch TV Series Section
-      final seriesRes = await http.get(Uri.parse('$_baseUrl/discover/tv?api_key=${AppConfig.tmdbApiKey}&sort_by=popularity.desc'));
+      // 5. Process series
+      final seriesRes = responses[2];
       if (seriesRes.statusCode == 200) {
         final data = json.decode(seriesRes.body);
         _series = (data['results'] as List<dynamic>? ?? []).map((item) {
@@ -110,8 +155,8 @@ class TMDBService extends ChangeNotifier {
         }).toList();
       }
 
-      // Fetch Netflix (Provider 8)
-      final netflixRes = await http.get(Uri.parse('$_baseUrl/discover/movie?api_key=${AppConfig.tmdbApiKey}&with_watch_providers=8&watch_region=US&sort_by=popularity.desc'));
+      // 6. Process Netflix
+      final netflixRes = responses[3];
       if (netflixRes.statusCode == 200) {
         final data = json.decode(netflixRes.body);
         _netflix = (data['results'] as List<dynamic>? ?? []).map((item) {
@@ -120,8 +165,8 @@ class TMDBService extends ChangeNotifier {
         }).toList();
       }
 
-      // Fetch Amazon Prime (Provider 9)
-      final primeRes = await http.get(Uri.parse('$_baseUrl/discover/movie?api_key=${AppConfig.tmdbApiKey}&with_watch_providers=9&watch_region=US&sort_by=popularity.desc'));
+      // 7. Process Prime
+      final primeRes = responses[4];
       if (primeRes.statusCode == 200) {
         final data = json.decode(primeRes.body);
         _prime = (data['results'] as List<dynamic>? ?? []).map((item) {
@@ -130,8 +175,8 @@ class TMDBService extends ChangeNotifier {
         }).toList();
       }
 
-      // Fetch Disney+ (Provider 337)
-      final disneyRes = await http.get(Uri.parse('$_baseUrl/discover/movie?api_key=${AppConfig.tmdbApiKey}&with_watch_providers=337&watch_region=US&sort_by=popularity.desc'));
+      // 8. Process Disney
+      final disneyRes = responses[5];
       if (disneyRes.statusCode == 200) {
         final data = json.decode(disneyRes.body);
         _disney = (data['results'] as List<dynamic>? ?? []).map((item) {
@@ -140,8 +185,8 @@ class TMDBService extends ChangeNotifier {
         }).toList();
       }
 
-      // Fetch Action Movies (Genre 28)
-      final actionRes = await http.get(Uri.parse('$_baseUrl/discover/movie?api_key=${AppConfig.tmdbApiKey}&with_genres=28&sort_by=popularity.desc'));
+      // 9. Process Action
+      final actionRes = responses[6];
       if (actionRes.statusCode == 200) {
         final data = json.decode(actionRes.body);
         _actionMovies = (data['results'] as List<dynamic>? ?? []).map((item) {
@@ -150,8 +195,8 @@ class TMDBService extends ChangeNotifier {
         }).toList();
       }
 
-      // Fetch Comedy Movies (Genre 35)
-      final comedyRes = await http.get(Uri.parse('$_baseUrl/discover/movie?api_key=${AppConfig.tmdbApiKey}&with_genres=35&sort_by=popularity.desc'));
+      // 10. Process Comedy
+      final comedyRes = responses[7];
       if (comedyRes.statusCode == 200) {
         final data = json.decode(comedyRes.body);
         _comedyMovies = (data['results'] as List<dynamic>? ?? []).map((item) {
@@ -160,8 +205,8 @@ class TMDBService extends ChangeNotifier {
         }).toList();
       }
 
-      // Fetch Sci-Fi Movies (Genre 878)
-      final scifiRes = await http.get(Uri.parse('$_baseUrl/discover/movie?api_key=${AppConfig.tmdbApiKey}&with_genres=878&sort_by=popularity.desc'));
+      // 11. Process SciFi
+      final scifiRes = responses[8];
       if (scifiRes.statusCode == 200) {
         final data = json.decode(scifiRes.body);
         _scifiMovies = (data['results'] as List<dynamic>? ?? []).map((item) {
@@ -170,8 +215,8 @@ class TMDBService extends ChangeNotifier {
         }).toList();
       }
 
-      // Fetch Horror Movies (Genre 27)
-      final horrorRes = await http.get(Uri.parse('$_baseUrl/discover/movie?api_key=${AppConfig.tmdbApiKey}&with_genres=27&sort_by=popularity.desc'));
+      // 12. Process Horror
+      final horrorRes = responses[9];
       if (horrorRes.statusCode == 200) {
         final data = json.decode(horrorRes.body);
         _horrorMovies = (data['results'] as List<dynamic>? ?? []).map((item) {
@@ -180,18 +225,68 @@ class TMDBService extends ChangeNotifier {
         }).toList();
       }
 
-      // Fetch Upcoming Movies
-      final upcomingRes = await http.get(Uri.parse('$_baseUrl/movie/upcoming?api_key=${AppConfig.tmdbApiKey}'));
+      // 13. Process Upcoming (Filter for real future releases strictly)
+      final upcomingRes = responses[10];
       if (upcomingRes.statusCode == 200) {
         final data = json.decode(upcomingRes.body);
-        _upcoming = (data['results'] as List<dynamic>? ?? []).map((item) {
+        final results = data['results'] as List<dynamic>? ?? [];
+        final nowStr = DateTime.now().toIso8601String().split('T').first;
+        _upcoming = results.where((item) {
+          final relDate = item['release_date'] as String? ?? '';
+          return relDate.isNotEmpty && relDate.compareTo(nowStr) > 0;
+        }).map((item) {
+          item['media_type'] = 'movie';
+          return item;
+        }).toList();
+        if (_upcoming.isEmpty) {
+          _upcoming = results.map((item) {
+            item['media_type'] = 'movie';
+            return item;
+          }).toList();
+        }
+      }
+
+      // 14. Process Bollywood
+      final bollywoodRes = responses[11];
+      if (bollywoodRes.statusCode == 200) {
+        final data = json.decode(bollywoodRes.body);
+        _bollywood = (data['results'] as List<dynamic>? ?? []).map((item) {
           item['media_type'] = 'movie';
           return item;
         }).toList();
       }
 
+      // 15. Process Pakistani
+      final pakistaniRes = responses[12];
+      if (pakistaniRes.statusCode == 200) {
+        final data = json.decode(pakistaniRes.body);
+        _pakistani = (data['results'] as List<dynamic>? ?? []).map((item) {
+          item['media_type'] = 'tv';
+          return item;
+        }).toList();
+      }
+
+      // 16. Save combined category models state mapping in Hive
+      final cacheBox = Hive.box('tmdb_cache_box');
+      final payload = {
+        'trending': _trending,
+        'movies': _movies,
+        'series': _series,
+        'netflix': _netflix,
+        'prime': _prime,
+        'disney': _disney,
+        'actionMovies': _actionMovies,
+        'comedyMovies': _comedyMovies,
+        'scifiMovies': _scifiMovies,
+        'horrorMovies': _horrorMovies,
+        'upcoming': _upcoming,
+        'bollywood': _bollywood,
+        'pakistani': _pakistani,
+      };
+      await cacheBox.put('categories_cache', json.encode(payload));
+      notifyListeners();
     } catch (e) {
-      debugPrint('Error fetching TMDB categories: $e');
+      debugPrint('Error fetching/saving parallel categories queries: $e');
       await _loadTrendingFromCache();
     } finally {
       _setLoading(false);
@@ -200,31 +295,48 @@ class TMDBService extends ChangeNotifier {
 
   Future<void> _loadTrendingFromCache() async {
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final cacheData = prefs.getString(_trendingCacheKey);
-      if (cacheData != null) {
-        final data = json.decode(cacheData);
-        final results = data['results'] as List<dynamic>? ?? [];
-        _trending = results.where((item) => 
-          item['media_type'] == 'movie' || item['media_type'] == 'tv'
-        ).toList();
-        
-        // Populate sections with subsets of cache for offline safety
-        _movies = _trending.where((item) => item['media_type'] == 'movie').toList();
-        _series = _trending.where((item) => item['media_type'] == 'tv').toList();
-        _netflix = _trending.take(3).toList();
-        _prime = _trending.skip(1).take(3).toList();
-        _disney = _trending.skip(2).take(2).toList();
-        _actionMovies = _movies;
-        _comedyMovies = _movies;
-        _scifiMovies = _movies;
-        _horrorMovies = _movies;
-        _upcoming = _movies;
+      final cacheBox = Hive.box('tmdb_cache_box');
+      final cachedStr = cacheBox.get('categories_cache') as String?;
+      if (cachedStr != null) {
+        final decoded = json.decode(cachedStr) as Map<String, dynamic>;
+        _trending = decoded['trending'] ?? [];
+        _movies = decoded['movies'] ?? [];
+        _series = decoded['series'] ?? [];
+        _netflix = decoded['netflix'] ?? [];
+        _prime = decoded['prime'] ?? [];
+        _disney = decoded['disney'] ?? [];
+        _actionMovies = decoded['actionMovies'] ?? [];
+        _comedyMovies = decoded['comedyMovies'] ?? [];
+        _scifiMovies = decoded['scifiMovies'] ?? [];
+        _horrorMovies = decoded['horrorMovies'] ?? [];
+        _upcoming = decoded['upcoming'] ?? [];
+        _bollywood = decoded['bollywood'] ?? [];
+        _pakistani = decoded['pakistani'] ?? [];
         notifyListeners();
       }
     } catch (e) {
       debugPrint('Error parsing offline trending cache: $e');
     }
+  }
+
+  Future<List<dynamic>> fetchRecommendations(int id, String mediaType) async {
+    if (!hasApiKey) {
+      return _getMockTrending().take(4).toList();
+    }
+    try {
+      final res = await http.get(Uri.parse('$_baseUrl/$mediaType/$id/recommendations?api_key=${AppConfig.tmdbApiKey}'));
+      if (res.statusCode == 200) {
+        final data = json.decode(res.body);
+        final results = data['results'] as List<dynamic>? ?? [];
+        return results.map((item) {
+          item['media_type'] = mediaType;
+          return item;
+        }).toList();
+      }
+    } catch (e) {
+      debugPrint('Error fetching TMDB recommendations: $e');
+    }
+    return [];
   }
 
   Future<void> search(String query) async {
