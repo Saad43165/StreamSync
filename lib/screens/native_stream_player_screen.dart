@@ -387,7 +387,7 @@ class _NativeStreamPlayerScreenState extends State<NativeStreamPlayerScreen>
     _videoPlayingDetected = false;
 
     // Increased to 60s for slow embed players that load via iframes
-    _loadingTimeout = Timer(const Duration(seconds: 60), () {
+    _loadingTimeout = Timer(const Duration(seconds: 90), () {
       if (!mounted || _autoSwitchTriggered || _videoPlayingDetected) return;
       _checkVideoStatusBeforeSwitch();
     });
@@ -473,7 +473,7 @@ class _NativeStreamPlayerScreenState extends State<NativeStreamPlayerScreen>
       if (status == 'hasVideo' || status == 'loading' || status == 'hasIframe' || status == 'hasPlayer') {
         // Page has media content - extend timeout and keep waiting
         _loadingTimeout?.cancel();
-        _loadingTimeout = Timer(const Duration(seconds: 20), () {
+        _loadingTimeout = Timer(const Duration(seconds: 40), () {
           if (!mounted || _videoPlayingDetected || _autoSwitchTriggered) return;
           _finalVideoCheck();
         });
@@ -1023,10 +1023,9 @@ class _NativeStreamPlayerScreenState extends State<NativeStreamPlayerScreen>
               }
 
               const safeHosts = [
-                'vidlink.pro', 'vidsrc.fyi', 'vidsrc.to', 'vidsrc.cc',
-                'vidsrc-embed.ru', 'vidsrc.me', 'embed.su', 'autoembed.co',
-                'smashystream.com', '2embed.cc', 'multiembed.mov',
-                'vidfast.pro', 'jwplatform.com', 'jwpcdn.com',
+                'vidlink.pro', 'vsembed.ru', 'vsembed.su', 'embed.su', 'autoembed.co',
+                '2embed.cc', 'multiembed.mov', 'vidfast.vc',
+                'jwplatform.com', 'jwpcdn.com',
                 'filemoon.sx', 'streamtape.com', 'doodstream.com',
                 'mixdrop.co', 'upstream.to', 'fembed.com',
               ];

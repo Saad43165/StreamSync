@@ -35,7 +35,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
     super.dispose();
   }
 
-  // FIXED: Use mounted check with _isMounted flag
   bool get _safeMounted => _isMounted && mounted;
 
   Future<void> _loadMetrics() async {
@@ -48,7 +47,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
       int cacheBytes = 0;
 
       if (await docDir.exists()) {
-        // FIXED: Limit recursion depth to prevent hanging on large directories
         await for (final file in docDir.list(recursive: true, followLinks: false)) {
           if (!_safeMounted) return;
           if (file is File) {
@@ -60,9 +58,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               } else if (path.endsWith('.hive') || path.endsWith('.hive.lock') || path.contains('tmdb_cache_box')) {
                 cacheBytes += length;
               }
-            } catch (_) {
-              // Skip files we can't read
-            }
+            } catch (_) {}
           }
         }
       }
@@ -79,7 +75,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
     }
   }
 
-  // FIXED: Added helper methods for formatting
   String _formatBytes(int bytes) {
     if (bytes < 1024) return '$bytes B';
     if (bytes < 1024 * 1024) return '${(bytes / 1024).toStringAsFixed(1)} KB';
@@ -368,19 +363,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
               _sectionLabel('Streaming settings'),
               _settingsCard([
                 _actiontile(
-                  icon: Icons.language_rounded,
-                  label: 'Streaming Region',
-                  trailing: Text(
-                    dbService.selectedCountry == 'US' ? '🇺🇸 United States' :
-                    dbService.selectedCountry == 'IN' ? '🇮🇳 India' :
-                    dbService.selectedCountry == 'GB' ? '🇬🇧 United Kingdom' :
-                    dbService.selectedCountry == 'CA' ? '🇨🇦 Canada' : '🇦🇺 Australia',
-                    style: const TextStyle(color: AppTheme.textSecondary, fontSize: 12),
-                  ),
-                  onTap: () => _showRegionPicker(context, dbService, tmdbService),
-                ),
-                _divider(),
-                _actiontile(
                   icon: Icons.subtitles_outlined,
                   label: 'Subtitles Multiplier',
                   trailing: Text(
@@ -493,7 +475,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
               const SizedBox(height: 20),
 
-              _sectionLabel('About CineSync'),
+              _sectionLabel('About StreamSync'),
               _settingsCard([
                 _infotile(
                   icon: Icons.info_outline_rounded,
@@ -521,8 +503,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
       ),
     );
   }
-
-  // ─── Helpers ───────────────────────────────────────────────────────
 
   Widget _sectionLabel(String label) {
     return Padding(
@@ -562,7 +542,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           Container(
             padding: const EdgeInsets.all(10),
             decoration: BoxDecoration(
-              color: iconColor.withOpacity(0.1), // FIXED
+              color: iconColor.withOpacity(0.1),
               shape: BoxShape.circle,
             ),
             child: Icon(icon, color: iconColor, size: 20),
@@ -573,25 +553,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                Text(
-                  value,
-                  style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.bold),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
+                Text(value, style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.bold), maxLines: 1, overflow: TextOverflow.ellipsis),
                 const SizedBox(height: 2),
-                Text(
-                  title,
-                  style: const TextStyle(color: Colors.white70, fontSize: 10, fontWeight: FontWeight.w600),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-                Text(
-                  subtitle,
-                  style: const TextStyle(color: AppTheme.textSecondary, fontSize: 8),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
+                Text(title, style: const TextStyle(color: Colors.white70, fontSize: 10, fontWeight: FontWeight.w600), maxLines: 1, overflow: TextOverflow.ellipsis),
+                Text(subtitle, style: const TextStyle(color: AppTheme.textSecondary, fontSize: 8), maxLines: 1, overflow: TextOverflow.ellipsis),
               ],
             ),
           ),
@@ -600,36 +565,21 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
-  Widget _infotile({
-    required IconData icon,
-    required String label,
-    required Widget trailing,
-  }) {
+  Widget _infotile({required IconData icon, required String label, required Widget trailing}) {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
       child: Row(
         children: [
           Icon(icon, color: Colors.white38, size: 18),
           const SizedBox(width: 14),
-          Expanded(
-            child: Text(
-              label,
-              style: const TextStyle(color: Colors.white70, fontSize: 13, fontWeight: FontWeight.w500),
-            ),
-          ),
+          Expanded(child: Text(label, style: const TextStyle(color: Colors.white70, fontSize: 13, fontWeight: FontWeight.w500))),
           trailing,
         ],
       ),
     );
   }
 
-  Widget _actiontile({
-    required IconData icon,
-    required String label,
-    Color color = Colors.white,
-    Widget? trailing,
-    required VoidCallback onTap,
-  }) {
+  Widget _actiontile({required IconData icon, required String label, Color color = Colors.white, Widget? trailing, required VoidCallback onTap}) {
     return InkWell(
       onTap: onTap,
       borderRadius: BorderRadius.circular(16),
@@ -639,16 +589,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           children: [
             Icon(icon, color: color == Colors.white ? Colors.white38 : color, size: 18),
             const SizedBox(width: 14),
-            Expanded(
-              child: Text(
-                label,
-                style: TextStyle(
-                  color: color == Colors.white ? Colors.white : color,
-                  fontSize: 13,
-                  fontWeight: color == Colors.white ? FontWeight.w500 : FontWeight.bold,
-                ),
-              ),
-            ),
+            Expanded(child: Text(label, style: TextStyle(color: color == Colors.white ? Colors.white : color, fontSize: 13, fontWeight: color == Colors.white ? FontWeight.w500 : FontWeight.bold))),
             trailing ?? const Icon(Icons.chevron_right_rounded, color: Colors.white24, size: 18),
           ],
         ),
@@ -656,56 +597,33 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
-  Widget _switchTile({
-    required IconData icon,
-    required String label,
-    required bool value,
-    required ValueChanged<bool> onChanged,
-  }) {
+  Widget _switchTile({required IconData icon, required String label, required bool value, required ValueChanged<bool> onChanged}) {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       child: Row(
         children: [
           Icon(icon, color: Colors.white38, size: 18),
           const SizedBox(width: 14),
-          Expanded(
-            child: Text(
-              label,
-              style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w500),
-            ),
-          ),
+          Expanded(child: Text(label, style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w500))),
           GestureDetector(
             onTap: () => onChanged(!value),
             child: AnimatedContainer(
               duration: const Duration(milliseconds: 250),
-              width: 44,
-              height: 24,
-              padding: const EdgeInsets.all(2.5),
+              width: 44, height: 24, padding: const EdgeInsets.all(2.5),
               decoration: BoxDecoration(
                 borderRadius: BorderRadius.circular(12),
-                color: value ? AppTheme.accent.withOpacity(0.2) : Colors.white.withOpacity(0.06), // FIXED
-                border: Border.all(
-                  color: value ? AppTheme.accent : Colors.white.withOpacity(0.12), // FIXED
-                  width: 1.0,
-                ),
+                color: value ? AppTheme.accent.withOpacity(0.2) : Colors.white.withOpacity(0.06),
+                border: Border.all(color: value ? AppTheme.accent : Colors.white.withOpacity(0.12), width: 1.0),
               ),
               child: AnimatedAlign(
                 duration: const Duration(milliseconds: 250),
                 alignment: value ? Alignment.centerRight : Alignment.centerLeft,
                 child: Container(
-                  width: 17,
-                  height: 17,
+                  width: 17, height: 17,
                   decoration: BoxDecoration(
                     color: value ? AppTheme.accent : Colors.white54,
                     shape: BoxShape.circle,
-                    boxShadow: value
-                        ? [
-                      BoxShadow(
-                        color: AppTheme.accent.withOpacity(0.5), // FIXED
-                        blurRadius: 4,
-                      )
-                    ]
-                        : null,
+                    boxShadow: value ? [BoxShadow(color: AppTheme.accent.withOpacity(0.5), blurRadius: 4)] : null,
                   ),
                 ),
               ),
@@ -717,10 +635,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   Widget _divider() {
-    return const Padding(
-      padding: EdgeInsets.symmetric(horizontal: 16),
-      child: Divider(height: 1, color: Colors.white10),
-    );
+    return const Padding(padding: EdgeInsets.symmetric(horizontal: 16), child: Divider(height: 1, color: Colors.white10));
   }
 
   Widget _premiumCard(BuildContext context, DatabaseService dbService) {
@@ -728,17 +643,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
     return Container(
       decoration: BoxDecoration(
         gradient: LinearGradient(
-          colors: isPremium
-              ? [const Color(0xFF0F261C), const Color(0xFF07120D)]
-              : [const Color(0xFF281E10), const Color(0xFF130E07)],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
+          colors: isPremium ? [const Color(0xFF0F261C), const Color(0xFF07120D)] : [const Color(0xFF281E10), const Color(0xFF130E07)],
+          begin: Alignment.topLeft, end: Alignment.bottomRight,
         ),
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(
-          color: isPremium ? Colors.tealAccent.withOpacity(0.25) : AppTheme.secondaryAccent.withOpacity(0.3), // FIXED
-          width: 1,
-        ),
+        border: Border.all(color: isPremium ? Colors.tealAccent.withOpacity(0.25) : AppTheme.secondaryAccent.withOpacity(0.3), width: 1),
       ),
       padding: const EdgeInsets.all(18),
       child: Column(
@@ -746,27 +655,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
         children: [
           Row(
             children: [
-              Icon(
-                isPremium ? Icons.verified_user_rounded : Icons.workspace_premium_rounded,
-                color: isPremium ? Colors.tealAccent : AppTheme.secondaryAccent,
-                size: 26,
-              ),
+              Icon(isPremium ? Icons.verified_user_rounded : Icons.workspace_premium_rounded, color: isPremium ? Colors.tealAccent : AppTheme.secondaryAccent, size: 26),
               const SizedBox(width: 12),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      isPremium ? 'Premium Pro Member' : 'Unlock Premium Access',
-                      style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14),
-                    ),
-                    Text(
-                      isPremium ? 'Lifetime License Activated • No Ads' : 'Secure sandbox checkout simulator',
-                      style: TextStyle(
-                        color: isPremium ? Colors.tealAccent.withOpacity(0.75) : AppTheme.secondaryAccent.withOpacity(0.75), // FIXED
-                        fontSize: 11,
-                      ),
-                    ),
+                    Text(isPremium ? 'Premium Pro Member' : 'Unlock Premium Access', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14)),
+                    Text(isPremium ? 'Lifetime License Activated • No Ads' : 'Secure sandbox checkout simulator',
+                        style: TextStyle(color: isPremium ? Colors.tealAccent.withOpacity(0.75) : AppTheme.secondaryAccent.withOpacity(0.75), fontSize: 11)),
                   ],
                 ),
               ),
@@ -774,41 +671,22 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
           if (!isPremium) ...[
             const SizedBox(height: 14),
-            const Wrap(
-              spacing: 6,
-              runSpacing: 4,
-              children: [
-                _BenefitChip('No Ad-rolls'),
-                _BenefitChip('Global Servers'),
-                _BenefitChip('Sync Data'),
-                _BenefitChip('Sandboxed'),
-              ],
-            ),
+            const Wrap(spacing: 6, runSpacing: 4, children: [
+              _BenefitChip('No Ad-rolls'), _BenefitChip('Global Servers'), _BenefitChip('Sync Data'), _BenefitChip('Sandboxed'),
+            ]),
             const SizedBox(height: 16),
             SizedBox(
               width: double.infinity,
               child: ElevatedButton(
                 onPressed: () => _showCheckoutSheet(context, dbService),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: AppTheme.secondaryAccent,
-                  foregroundColor: Colors.black,
-                  elevation: 0,
-                  padding: const EdgeInsets.symmetric(vertical: 12),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                ),
-                child: const Text(
-                  'Launch Sandbox Upgrader',
-                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
-                ),
+                style: ElevatedButton.styleFrom(backgroundColor: AppTheme.secondaryAccent, foregroundColor: Colors.black, elevation: 0, padding: const EdgeInsets.symmetric(vertical: 12), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))),
+                child: const Text('Launch Sandbox Upgrader', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
               ),
             ),
           ] else ...[
             const SizedBox(height: 12),
             TextButton(
-              onPressed: () {
-                dbService.togglePremium();
-                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Membership deactivated (sandbox).')));
-              },
+              onPressed: () { dbService.togglePremium(); ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Membership deactivated (sandbox).'))); },
               child: const Text('Restore Free Access tier', style: TextStyle(color: Colors.white24, fontSize: 11, decoration: TextDecoration.underline)),
             ),
           ],
@@ -820,261 +698,89 @@ class _SettingsScreenState extends State<SettingsScreen> {
   void _showCheckoutSheet(BuildContext context, DatabaseService dbService) {
     bool isProcessing = false;
     bool isSuccess = false;
-
     showModalBottomSheet(
-      context: context,
-      backgroundColor: AppTheme.surface,
-      isScrollControlled: true,
+      context: context, backgroundColor: AppTheme.surface, isScrollControlled: true,
       shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
       builder: (sheetContext) {
         return StatefulBuilder(builder: (context, setModalState) {
           return Padding(
-            padding: EdgeInsets.only(
-              top: 20, left: 20, right: 20,
-              bottom: MediaQuery.of(context).viewInsets.bottom + 20,
-            ),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Container(width: 40, height: 4, decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(2))),
+            padding: EdgeInsets.only(top: 20, left: 20, right: 20, bottom: MediaQuery.of(context).viewInsets.bottom + 20),
+            child: Column(mainAxisSize: MainAxisSize.min, children: [
+              Container(width: 40, height: 4, decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(2))),
+              const SizedBox(height: 20),
+              if (!isProcessing && !isSuccess) ...[
+                const Icon(Icons.security_rounded, color: AppTheme.accent, size: 40), const SizedBox(height: 12),
+                const Text('Secure Checkout Simulator', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16)), const SizedBox(height: 6),
+                const Text('This is a sandboxed payment verification gate designed for Play Store verification testing.', textAlign: TextAlign.center, style: TextStyle(color: AppTheme.textSecondary, fontSize: 11, height: 1.4)), const SizedBox(height: 20),
+                Container(padding: const EdgeInsets.all(16), decoration: BoxDecoration(color: Colors.white.withOpacity(0.03), borderRadius: BorderRadius.circular(12), border: Border.all(color: Colors.white.withOpacity(0.06))),
+                    child: const Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+                      Text('StreamSync Pro (Lifetime license)', style: TextStyle(color: Colors.white70, fontSize: 12, fontWeight: FontWeight.bold)),
+                      Text('\$1.99', style: TextStyle(color: AppTheme.accent, fontWeight: FontWeight.bold, fontSize: 13)),
+                    ])),
                 const SizedBox(height: 20),
-                if (!isProcessing && !isSuccess) ...[
-                  const Icon(Icons.security_rounded, color: AppTheme.accent, size: 40),
-                  const SizedBox(height: 12),
-                  const Text('Secure Checkout Simulator', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16)),
-                  const SizedBox(height: 6),
-                  const Text('This is a sandboxed payment verification gate designed for Play Store verification testing.', textAlign: TextAlign.center, style: TextStyle(color: AppTheme.textSecondary, fontSize: 11, height: 1.4)),
-                  const SizedBox(height: 20),
-                  Container(
-                    padding: const EdgeInsets.all(16),
-                    decoration: BoxDecoration(
-                      color: Colors.white.withOpacity(0.03), // FIXED
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: Colors.white.withOpacity(0.06)), // FIXED
-                    ),
-                    child: const Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Text('CineSync Pro (Lifetime license)', style: TextStyle(color: Colors.white70, fontSize: 12, fontWeight: FontWeight.bold)),
-                        Text('\$1.99', style: TextStyle(color: AppTheme.accent, fontWeight: FontWeight.bold, fontSize: 13)),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(height: 20),
-                  SizedBox(
-                    width: double.infinity,
-                    child: ElevatedButton.icon(
-                      onPressed: () {
-                        setModalState(() => isProcessing = true);
-                        Future.delayed(const Duration(seconds: 2), () {
-                          if (!sheetContext.mounted) return;
-                          setModalState(() {
-                            isProcessing = false;
-                            isSuccess = true;
-                          });
-                          dbService.togglePremium();
-                        });
-                      },
-                      icon: const Icon(Icons.shopping_bag_rounded, size: 16, color: Colors.black),
-                      label: const Text('Authorize Sandbox Purchase', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.black)),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: AppTheme.secondaryAccent,
-                        padding: const EdgeInsets.symmetric(vertical: 14),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                      ),
-                    ),
-                  ),
-                ] else if (isProcessing) ...[
-                  const SizedBox(height: 40),
-                  const CircularProgressIndicator(color: AppTheme.accent),
-                  const SizedBox(height: 20),
-                  const Text('Authorizing Sandbox Transaction...', style: TextStyle(color: Colors.white70, fontSize: 13, fontWeight: FontWeight.w600)),
-                  const SizedBox(height: 40),
-                ] else ...[
-                  const Icon(Icons.check_circle_rounded, color: Colors.greenAccent, size: 56),
-                  const SizedBox(height: 14),
-                  const Text('Transaction Authorized!', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16)),
-                  const SizedBox(height: 6),
-                  const Text('Premium membership enabled. Watch Ads-free natively.', textAlign: TextAlign.center, style: TextStyle(color: AppTheme.textSecondary, fontSize: 11)),
-                  const SizedBox(height: 24),
-                  SizedBox(
-                    width: double.infinity,
-                    child: ElevatedButton(
-                      onPressed: () {
-                        Navigator.pop(context);
-                        _loadMetrics();
-                      },
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: AppTheme.accent,
-                        foregroundColor: Colors.black,
-                        padding: const EdgeInsets.symmetric(vertical: 12),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                      ),
-                      child: const Text('Return to settings', style: TextStyle(fontWeight: FontWeight.bold)),
-                    ),
-                  ),
-                ],
+                SizedBox(width: double.infinity, child: ElevatedButton.icon(
+                  onPressed: () { setModalState(() => isProcessing = true); Future.delayed(const Duration(seconds: 2), () { if (!sheetContext.mounted) return; setModalState(() { isProcessing = false; isSuccess = true; }); dbService.togglePremium(); }); },
+                  icon: const Icon(Icons.shopping_bag_rounded, size: 16, color: Colors.black), label: const Text('Authorize Sandbox Purchase', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.black)),
+                  style: ElevatedButton.styleFrom(backgroundColor: AppTheme.secondaryAccent, padding: const EdgeInsets.symmetric(vertical: 14), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))),
+                )),
+              ] else if (isProcessing) ...[
+                const SizedBox(height: 40), const CircularProgressIndicator(color: AppTheme.accent), const SizedBox(height: 20),
+                const Text('Authorizing Sandbox Transaction...', style: TextStyle(color: Colors.white70, fontSize: 13, fontWeight: FontWeight.w600)), const SizedBox(height: 40),
+              ] else ...[
+                const Icon(Icons.check_circle_rounded, color: Colors.greenAccent, size: 56), const SizedBox(height: 14),
+                const Text('Transaction Authorized!', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16)), const SizedBox(height: 6),
+                const Text('Premium membership enabled. Watch Ads-free natively.', textAlign: TextAlign.center, style: TextStyle(color: AppTheme.textSecondary, fontSize: 11)), const SizedBox(height: 24),
+                SizedBox(width: double.infinity, child: ElevatedButton(onPressed: () { Navigator.pop(context); _loadMetrics(); }, style: ElevatedButton.styleFrom(backgroundColor: AppTheme.accent, foregroundColor: Colors.black, padding: const EdgeInsets.symmetric(vertical: 12), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))), child: const Text('Return to settings', style: TextStyle(fontWeight: FontWeight.bold)))),
               ],
-            ),
+            ]),
           );
         });
       },
     );
   }
 
-  void _showRegionPicker(BuildContext context, DatabaseService dbService, TMDBService tmdbService) {
-    final Map<String, Map<String, String>> regions = {
-      'US': {'name': 'United States', 'flag': '🇺🇸'},
-      'IN': {'name': 'India', 'flag': '🇮🇳'},
-      'GB': {'name': 'United Kingdom', 'flag': '🇬🇧'},
-      'CA': {'name': 'Canada', 'flag': '🇨🇦'},
-      'AU': {'name': 'Australia', 'flag': '🇦🇺'},
-    };
-
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: AppTheme.surface,
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
-      builder: (context) {
-        return Padding(
-          padding: const EdgeInsets.symmetric(vertical: 20),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Container(width: 40, height: 4, decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(2))),
-              const SizedBox(height: 16),
-              const Text('Select Streaming Region', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16)),
-              const SizedBox(height: 12),
-              ...regions.entries.map((entry) {
-                final isSelected = dbService.selectedCountry == entry.key;
-                return ListTile(
-                  leading: Text(entry.value['flag']!, style: const TextStyle(fontSize: 22)),
-                  title: Text(entry.value['name']!, style: const TextStyle(color: Colors.white, fontSize: 14)),
-                  trailing: isSelected ? const Icon(Icons.check_circle_rounded, color: AppTheme.accent) : null,
-                  onTap: () {
-                    dbService.updateCountry(entry.key);
-                    tmdbService.fetchTrending();
-                    Navigator.pop(context);
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(content: Text('Region updated to ${entry.value['name']}')),
-                    );
-                  },
-                );
-              }),
-            ],
-          ),
-        );
-      },
-    );
-  }
-
   void _showSubtitleSettings(BuildContext context, DatabaseService dbService) {
-    final sizes = [
-      {'label': 'Small (80%)', 'value': 0.8},
-      {'label': 'Medium (100%)', 'value': 1.0},
-      {'label': 'Large (130%)', 'value': 1.3},
-      {'label': 'X-Large (160%)', 'value': 1.6},
-    ];
-
+    final sizes = [{'label': 'Small (80%)', 'value': 0.8}, {'label': 'Medium (100%)', 'value': 1.0}, {'label': 'Large (130%)', 'value': 1.3}, {'label': 'X-Large (160%)', 'value': 1.6}];
     showModalBottomSheet(
-      context: context,
-      backgroundColor: AppTheme.surface,
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
-      builder: (context) {
-        return Padding(
-          padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 16),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Container(width: 40, height: 4, decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(2))),
-              const SizedBox(height: 16),
-              const Text('Subtitle Scale', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16)),
-              const SizedBox(height: 12),
-              ...sizes.map((size) {
-                final isSelected = dbService.captionSizeMultiplier == size['value'];
-                return ListTile(
-                  title: Text(size['label'] as String, style: const TextStyle(color: Colors.white, fontSize: 14)),
-                  trailing: isSelected ? const Icon(Icons.check_circle_rounded, color: AppTheme.accent) : null,
-                  onTap: () {
-                    dbService.updateCaptionSize(size['value'] as double);
-                    Navigator.pop(context);
-                  },
-                );
-              }),
-            ],
-          ),
-        );
-      },
+      context: context, backgroundColor: AppTheme.surface, shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (context) => Padding(padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 16), child: Column(mainAxisSize: MainAxisSize.min, children: [
+        Container(width: 40, height: 4, decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(2))), const SizedBox(height: 16),
+        const Text('Subtitle Scale', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16)), const SizedBox(height: 12),
+        ...sizes.map((size) {
+          final isSelected = dbService.captionSizeMultiplier == size['value'];
+          return ListTile(title: Text(size['label'] as String, style: const TextStyle(color: Colors.white, fontSize: 14)), trailing: isSelected ? const Icon(Icons.check_circle_rounded, color: AppTheme.accent) : null, onTap: () { dbService.updateCaptionSize(size['value'] as double); Navigator.pop(context); });
+        }),
+      ])),
     );
   }
 
   void _showQualitySettings(BuildContext context, DatabaseService dbService) {
     final qualities = ['Auto', '1080p', '720p', '480p'];
-
     showModalBottomSheet(
-      context: context,
-      backgroundColor: AppTheme.surface,
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
-      builder: (context) {
-        return Padding(
-          padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 16),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Container(width: 40, height: 4, decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(2))),
-              const SizedBox(height: 16),
-              const Text('Default Video Quality', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16)),
-              const SizedBox(height: 12),
-              ...qualities.map((q) {
-                final isSelected = dbService.defaultQuality == q;
-                return ListTile(
-                  title: Text(q, style: const TextStyle(color: Colors.white, fontSize: 14)),
-                  trailing: isSelected ? const Icon(Icons.check_circle_rounded, color: AppTheme.accent) : null,
-                  onTap: () {
-                    dbService.updateQuality(q);
-                    Navigator.pop(context);
-                  },
-                );
-              }),
-            ],
-          ),
-        );
-      },
+      context: context, backgroundColor: AppTheme.surface, shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (context) => Padding(padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 16), child: Column(mainAxisSize: MainAxisSize.min, children: [
+        Container(width: 40, height: 4, decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(2))), const SizedBox(height: 16),
+        const Text('Default Video Quality', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16)), const SizedBox(height: 12),
+        ...qualities.map((q) {
+          final isSelected = dbService.defaultQuality == q;
+          return ListTile(title: Text(q, style: const TextStyle(color: Colors.white, fontSize: 14)), trailing: isSelected ? const Icon(Icons.check_circle_rounded, color: AppTheme.accent) : null, onTap: () { dbService.updateQuality(q); Navigator.pop(context); });
+        }),
+      ])),
     );
   }
 
   void _showSpeedSettings(BuildContext context, DatabaseService dbService) {
     final speeds = [0.5, 0.75, 1.0, 1.25, 1.5, 2.0];
-
     showModalBottomSheet(
-      context: context,
-      backgroundColor: AppTheme.surface,
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
-      builder: (context) {
-        return Padding(
-          padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 16),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Container(width: 40, height: 4, decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(2))),
-              const SizedBox(height: 16),
-              const Text('Playback Speed', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16)),
-              const SizedBox(height: 12),
-              ...speeds.map((s) {
-                final isSelected = dbService.playbackSpeed == s;
-                return ListTile(
-                  title: Text('${s}x', style: const TextStyle(color: Colors.white, fontSize: 14)),
-                  trailing: isSelected ? const Icon(Icons.check_circle_rounded, color: AppTheme.accent) : null,
-                  onTap: () {
-                    dbService.updatePlaybackSpeed(s);
-                    Navigator.pop(context);
-                  },
-                );
-              }),
-            ],
-          ),
-        );
-      },
+      context: context, backgroundColor: AppTheme.surface, shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (context) => Padding(padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 16), child: Column(mainAxisSize: MainAxisSize.min, children: [
+        Container(width: 40, height: 4, decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(2))), const SizedBox(height: 16),
+        const Text('Playback Speed', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16)), const SizedBox(height: 12),
+        ...speeds.map((s) {
+          final isSelected = dbService.playbackSpeed == s;
+          return ListTile(title: Text('${s}x', style: const TextStyle(color: Colors.white, fontSize: 14)), trailing: isSelected ? const Icon(Icons.check_circle_rounded, color: AppTheme.accent) : null, onTap: () { dbService.updatePlaybackSpeed(s); Navigator.pop(context); });
+        }),
+      ])),
     );
   }
 }
@@ -1082,20 +788,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
 class _BenefitChip extends StatelessWidget {
   final String label;
   const _BenefitChip(this.label);
-
   @override
   Widget build(BuildContext context) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-      decoration: BoxDecoration(
-        color: AppTheme.secondaryAccent.withOpacity(0.1), // FIXED
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: AppTheme.secondaryAccent.withOpacity(0.2)), // FIXED
-      ),
-      child: Text(
-        '✓ $label',
-        style: const TextStyle(color: AppTheme.secondaryAccent, fontSize: 10, fontWeight: FontWeight.w600),
-      ),
+      decoration: BoxDecoration(color: AppTheme.secondaryAccent.withOpacity(0.1), borderRadius: BorderRadius.circular(20), border: Border.all(color: AppTheme.secondaryAccent.withOpacity(0.2))),
+      child: Text('✓ $label', style: const TextStyle(color: AppTheme.secondaryAccent, fontSize: 10, fontWeight: FontWeight.w600)),
     );
   }
 }

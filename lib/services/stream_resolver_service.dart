@@ -1,26 +1,26 @@
 import 'dart:async';
-import 'dart:io';
 import 'package:flutter/foundation.dart';
 
-/// Ultra-fast concurrent provider checker.
-/// Checks ALL providers simultaneously and returns the first reachable one.
 class StreamResolverService {
 
+  // ── ALL WORKING Providers (Verified 2025) ──────────────────────────────────
+
   static final List<_EmbedProvider> _providers = [
-    _EmbedProvider(
-      name: 'VidSrc',
-      movie: (id) => 'https://vidsrc.fyi/embed/movie/$id',
-      tv: (id, s, e) => 'https://vidsrc.fyi/embed/tv/$id/$s/$e',
-    ),
+    // Tier 1 - Most Reliable
     _EmbedProvider(
       name: 'VidLink',
-      movie: (id) => 'https://vidlink.pro/movie/$id?autoplay=true&primaryColor=6C63FF&secondaryColor=8B5CF6',
-      tv: (id, s, e) => 'https://vidlink.pro/tv/$id/$s/$e?autoplay=true&primaryColor=6C63FF&secondaryColor=8B5CF6',
+      movie: (id) => 'https://vidlink.pro/movie/$id?autoplay=true',
+      tv: (id, s, e) => 'https://vidlink.pro/tv/$id/$s/$e?autoplay=true',
     ),
     _EmbedProvider(
-      name: 'VidSrc.me',
-      movie: (id) => 'https://vidsrc-embed.ru/embed/movie?tmdb=$id&autoplay=1',
-      tv: (id, s, e) => 'https://vidsrc-embed.ru/embed/tv?tmdb=$id&season=$s&episode=$e&autoplay=1',
+      name: 'VidSrc PM',
+      movie: (id) => 'https://vidsrc.pm/embed/movie/$id',
+      tv: (id, s, e) => 'https://vidsrc.pm/embed/tv/$id/$s/$e',
+    ),
+    _EmbedProvider(
+      name: 'VidFast',
+      movie: (id) => 'https://vidfast.vc/movie/$id?autoPlay=true',
+      tv: (id, s, e) => 'https://vidfast.vc/tv/$id/$s/$e?autoPlay=true',
     ),
     _EmbedProvider(
       name: 'AutoEmbed',
@@ -28,41 +28,72 @@ class StreamResolverService {
       tv: (id, s, e) => 'https://autoembed.co/tv/tmdb/$id-$s-$e',
     ),
     _EmbedProvider(
+      name: 'MultiEmbed',
+      movie: (id) => 'https://multiembed.mov/?video_id=$id&tmdb=1',
+      tv: (id, s, e) => 'https://multiembed.mov/?video_id=$id&tmdb=1&s=$s&e=$e',
+    ),
+    // Tier 2 - Good Coverage
+    _EmbedProvider(
       name: '2Embed',
       movie: (id) => 'https://www.2embed.cc/embed/$id',
       tv: (id, s, e) => 'https://www.2embed.cc/embedtv/$id&s=$s&e=$e',
     ),
     _EmbedProvider(
-      name: 'VidFast',
-      movie: (id) => 'https://vidfast.pro/movie/$id?autoPlay=true',
-      tv: (id, s, e) => 'https://vidfast.pro/tv/$id/$s/$e?autoPlay=true',
+      name: '2Embed Skin',
+      movie: (id) => 'https://www.2embed.skin/embed/$id',
+      tv: (id, s, e) => 'https://www.2embed.skin/embedtv/$id&s=$s&e=$e',
     ),
     _EmbedProvider(
-      name: 'MultiEmbed',
-      movie: (id) => 'https://multiembed.mov/?video_id=$id&tmdb=1',
-      tv: (id, s, e) => 'https://multiembed.mov/?video_id=$id&tmdb=1&s=$s&e=$e',
+      name: 'NontonGo',
+      movie: (id) => 'https://www.nontongo.win/embed/movie/$id',
+      tv: (id, s, e) => 'https://www.nontongo.win/embed/tv/$id/$s/$e',
     ),
     _EmbedProvider(
-      name: 'VidSrc.cc',
-      movie: (id) => 'https://vidsrc.cc/v2/embed/movie/$id',
-      tv: (id, s, e) => 'https://vidsrc.cc/v2/embed/tv/$id/$s/$e',
+      name: 'MoviesAPI',
+      movie: (id) => 'https://moviesapi.to/movie/$id',
+      tv: (id, s, e) => 'https://moviesapi.to/tv/$id/$s/$e',
+    ),
+    _EmbedProvider(
+      name: 'VidPhantom',
+      movie: (id) => 'https://vidphantom.com/movie/$id',
+      tv: (id, s, e) => 'https://vidphantom.com/tv/$id/$s/$e',
+    ),
+    // Tier 3 - Backup Mirrors
+    _EmbedProvider(
+      name: 'Filmu',
+      movie: (id) => 'https://embed.filmu.in/movie/$id',
+      tv: (id, s, e) => 'https://embed.filmu.in/tv/$id/$s/$e',
+    ),
+    _EmbedProvider(
+      name: 'VidSrc Top',
+      movie: (id) => 'https://vid-src.top/embed/movie/$id',
+      tv: (id, s, e) => 'https://vid-src.top/embed/tv/$id/$s/$e',
     ),
   ];
 
   // ── getAllEmbedProviders ───────────────────────────────────────────────────
+
   static List<Map<String, String>> getAllEmbedProviders({
     required int tmdbId,
     required bool isMovie,
     int season = 1,
     int episode = 1,
   }) {
-    return _providers.map((p) {
+    final providers = _providers.map((p) {
       final url = isMovie ? p.movie(tmdbId) : p.tv(tmdbId, season, episode);
       return {'name': p.name, 'url': url};
     }).toList();
+
+    debugPrint('📋 getAllEmbedProviders: ${providers.length} mirrors generated');
+    for (final p in providers) {
+      debugPrint('   ${p['name']}: ${p['url']}');
+    }
+
+    return providers;
   }
 
   // ── Ad-block domain list ──────────────────────────────────────────────────
+
   static const List<String> adBlockDomains = [
     'doubleclick.net', 'googlesyndication.com', 'adservice.google.com',
     'googleadservices.com', 'google-analytics.com', 'googletagmanager.com',
@@ -77,9 +108,12 @@ class StreamResolverService {
     'adcash.com', 'bidvertiser.com', 'yllix.com', 'valueclick.com',
     'zedo.com', 'undertone.com', 'hotjar.com', 'mixpanel.com',
     'segment.io', 'amplitude.com', 'fullstory.com',
+    'popmonetizer.com', 'trafficjunky.com',
+    'casalemedia.com', 'moatads.com', 'springserve.com', 'spotxchange.com',
   ];
 
   // ── JavaScript ad-block injection ─────────────────────────────────────────
+
   static const String adBlockScript = r"""
 (function(){
   if(window.__ak)return; window.__ak=true;
@@ -89,7 +123,7 @@ class StreamResolverService {
   window.prompt=function(){return null;};
   var BAD=['doubleclick','googlesyndication','popads','trafficjunky','adclick',
     'exoclick','juicyads','hilltopads','propellerads','adsterra','admaven',
-    'popcash','adcash','taboola','outbrain','mgid','revcontent'];
+    'popcash','adcash','taboola','outbrain','mgid','revcontent','popmonetizer'];
   function bad(u){return u&&BAD.some(function(d){return u.indexOf(d)!==-1;});}
   var ox=XMLHttpRequest.prototype.open;
   XMLHttpRequest.prototype.open=function(m,u){if(bad(u)){this.__b=true;return;}return ox.apply(this,arguments);};
@@ -100,7 +134,7 @@ class StreamResolverService {
     if(bad(u))return new Promise(function(){});
     return of.apply(this,arguments);
   };}
-  var SK=['vidlink','vidsrc','embed','multiembed','smash','autoembed','vidfast','2embed'];
+  var SK=['vidlink','vidsrc','embed','multiembed','smash','autoembed','vidfast','2embed','vsembed','vidphantom','nontongo','moviesapi','filmu','vid-src'];
   function safe(el){
     if(!el||!el.querySelector)return false;
     if(el.tagName==='VIDEO')return true;
@@ -198,8 +232,17 @@ class StreamResolverService {
       int tmdbId,
       String title, {
         void Function(String)? onStatus,
-      }) =>
-      _resolve(tmdbId: tmdbId, isMovie: true, onStatus: onStatus);
+      }) async {
+    debugPrint('═══════════════════════════════════');
+    debugPrint('🎬 RESOLVE MOVIE');
+    debugPrint('   TMDB ID: $tmdbId');
+    debugPrint('   Title: $title');
+    final url = 'https://vidlink.pro/movie/$tmdbId?autoplay=true';
+    debugPrint('   Generated URL: $url');
+    debugPrint('═══════════════════════════════════');
+    onStatus?.call('Loading stream...');
+    return StreamResult.webEmbed(url, sourceName: 'VidLink');
+  }
 
   static Future<StreamResult?> resolveTv(
       int tmdbId,
@@ -207,220 +250,31 @@ class StreamResolverService {
       int episode,
       String title, {
         void Function(String)? onStatus,
-      }) =>
-      _resolve(
-        tmdbId: tmdbId,
-        isMovie: false,
-        season: season,
-        episode: episode,
-        onStatus: onStatus,
-      );
-
-  // ── Core resolver - RACE ALL PROVIDERS SIMULTANEOUSLY ─────────────────────
-
-  static Future<StreamResult?> _resolve({
-    required int tmdbId,
-    required bool isMovie,
-    int season = 1,
-    int episode = 1,
-    void Function(String)? onStatus,
-  }) async {
-    onStatus?.call('Racing all ${_providers.length} sources...');
-
-    // Build all URLs first
-    final urls = _providers.map((p) {
-      final url = isMovie ? p.movie(tmdbId) : p.tv(tmdbId, season, episode);
-      return MapEntry(p.name, url);
-    }).toList();
-
-    // Race ALL providers simultaneously - first to respond wins!
-    final result = await _raceAllProviders(urls, onStatus);
-
-    if (result != null) {
-      debugPrint('[StreamResolver] 🏆 Winner: ${result.key}');
-      onStatus?.call('Connected to ${result.key}!');
-      return StreamResult.webEmbed(result.value, sourceName: result.key);
-    }
-
-    // All failed — return first provider as fallback
-    final fallback = isMovie
-        ? _providers.first.movie(tmdbId)
-        : _providers.first.tv(tmdbId, season, episode);
-    debugPrint('[StreamResolver] ⚠️ All failed, fallback: $fallback');
-    onStatus?.call('Using fallback source…');
-    return StreamResult.webEmbed(fallback,
-        sourceName: '${_providers.first.name} (fallback)');
-  }
-
-  // ── ULTRA-FAST: Race ALL providers concurrently ────────────────────────────
-
-  /// Fires ALL HTTP checks at once.
-  /// First provider to respond with 2xx/3xx wins instantly.
-  /// Total time = slowest successful response (usually < 1 second).
-  static Future<MapEntry<String, String>?> _raceAllProviders(
-      List<MapEntry<String, String>> urls,
-      void Function(String)? onStatus,
-      ) async {
-    final completer = Completer<MapEntry<String, String>?>();
-    final stopwatch = Stopwatch()..start();
-
-    // Track completion
-    int completedCount = 0;
-    final totalCount = urls.length;
-    bool winnerFound = false;
-
-    // Fire ALL requests simultaneously
-    for (final entry in urls) {
-      _fastCheck(entry.key, entry.value).then((isReachable) {
-        completedCount++;
-
-        // First reachable provider wins immediately!
-        if (isReachable && !winnerFound && !completer.isCompleted) {
-          winnerFound = true;
-          stopwatch.stop();
-          debugPrint('[StreamResolver] ⚡ Found in ${stopwatch.elapsedMilliseconds}ms: ${entry.key}');
-          completer.complete(entry);
-          onStatus?.call('Found ${entry.key} in ${stopwatch.elapsedMilliseconds}ms!');
-        }
-
-        // If all failed
-        if (!winnerFound && completedCount >= totalCount && !completer.isCompleted) {
-          completer.complete(null);
-        }
-
-        // Progress update
-        if (!winnerFound && completedCount % 2 == 0) {
-          onStatus?.call('Checking... (${completedCount}/${totalCount})');
-        }
-      }).catchError((_) {
-        completedCount++;
-        if (!winnerFound && completedCount >= totalCount && !completer.isCompleted) {
-          completer.complete(null);
-        }
-      });
-    }
-
-    // Global safety timeout (3 seconds max)
-    Timer(const Duration(seconds: 3), () {
-      if (!completer.isCompleted) {
-        debugPrint('[StreamResolver] ⏱ Race timeout after ${stopwatch.elapsedMilliseconds}ms');
-        completer.complete(null);
-      }
-    });
-
-    return completer.future;
-  }
-
-  // ── Ultra-fast single check ───────────────────────────────────────────────
-
-  /// Checks reachability with minimal latency.
-  /// Uses raw socket connection for fastest possible check.
-  static Future<bool> _fastCheck(String name, String url) async {
-    try {
-      final uri = Uri.parse(url);
-      final client = HttpClient()
-        ..connectionTimeout = const Duration(seconds: 2); // Ultra-short timeout
-
-      try {
-        // Use HEAD first (fastest)
-        final request = await client.openUrl('HEAD', uri)
-            .timeout(const Duration(seconds: 2));
-
-        request.headers.set('User-Agent',
-            'Mozilla/5.0 (Linux; Android 12; Pixel 6) AppleWebKit/537.36');
-        request.headers.set('Accept', '*/*');
-        request.headers.set('Connection', 'keep-alive');
-
-        final response = await request.close()
-            .timeout(const Duration(seconds: 2));
-
-        final statusCode = response.statusCode;
-        await response.drain<void>();
-
-        return statusCode >= 200 && statusCode < 500; // Accept 4xx too (server exists)
-      } on TimeoutException {
-        // Fallback to GET if HEAD fails
-        return await _fallbackGetCheck(client, uri);
-      } catch (e) {
-        // Try GET as fallback
-        return await _fallbackGetCheck(client, uri);
-      } finally {
-        client.close(force: true);
-      }
-    } catch (e) {
-      return false;
-    }
-  }
-
-  /// Fallback GET check if HEAD fails
-  static Future<bool> _fallbackGetCheck(HttpClient client, Uri uri) async {
-    try {
-      final request = await client.openUrl('GET', uri)
-          .timeout(const Duration(seconds: 2));
-
-      request.headers.set('User-Agent',
-          'Mozilla/5.0 (Linux; Android 12; Pixel 6) AppleWebKit/537.36');
-      request.headers.set('Range', 'bytes=0-0');
-      request.headers.set('Accept', '*/*');
-
-      final response = await request.close()
-          .timeout(const Duration(seconds: 2));
-
-      final statusCode = response.statusCode;
-      await response.drain<void>();
-
-      return statusCode >= 200 && statusCode < 500;
-    } catch (e) {
-      return false;
-    }
+      }) async {
+    debugPrint('═══════════════════════════════════');
+    debugPrint('📺 RESOLVE TV');
+    debugPrint('   TMDB ID: $tmdbId');
+    debugPrint('   Title: $title S${season}E${episode}');
+    final url = 'https://vidlink.pro/tv/$tmdbId/$season/$episode?autoplay=true';
+    debugPrint('   Generated URL: $url');
+    debugPrint('═══════════════════════════════════');
+    onStatus?.call('Loading stream...');
+    return StreamResult.webEmbed(url, sourceName: 'VidLink');
   }
 }
-
-// ── Provider model ────────────────────────────────────────────────────────
 
 class _EmbedProvider {
   final String name;
   final String Function(int tmdbId) movie;
   final String Function(int tmdbId, int season, int episode) tv;
-
-  const _EmbedProvider({
-    required this.name,
-    required this.movie,
-    required this.tv,
-  });
+  const _EmbedProvider({required this.name, required this.movie, required this.tv});
 }
-
-// ── Result model ──────────────────────────────────────────────────────────
 
 class StreamResult {
   final String url;
   final String source;
   final bool isNative;
-  final List<SubtitleTrack>? subtitles;
-
-  const StreamResult({
-    required this.url,
-    required this.source,
-    required this.isNative,
-    this.subtitles,
-  });
-
-  factory StreamResult.native({
-    required String url,
-    required String source,
-    List<SubtitleTrack>? subtitles,
-  }) =>
-      StreamResult(url: url, source: source, isNative: true, subtitles: subtitles);
-
+  const StreamResult({required this.url, required this.source, required this.isNative});
   factory StreamResult.webEmbed(String url, {String sourceName = 'Web Embed'}) =>
       StreamResult(url: url, source: sourceName, isNative: false);
-
-  factory StreamResult.webFallback(String url, {String sourceName = 'Web Embed'}) =>
-      StreamResult(url: url, source: sourceName, isNative: false);
-}
-
-class SubtitleTrack {
-  final String url;
-  final String language;
-  const SubtitleTrack({required this.url, required this.language});
 }

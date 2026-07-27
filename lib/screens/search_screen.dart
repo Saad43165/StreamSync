@@ -217,13 +217,28 @@ class _SearchScreenState extends State<SearchScreen> {
                     _buildRecentSearches(tmdbService),
                   ],
 
-                  Text(
-                    isSearching ? 'SEARCH RESULTS' : 'SUGGESTED FOR YOU',
-                    style: const TextStyle(
-                        color: AppTheme.textSecondary,
-                        fontSize: 11,
-                        fontWeight: FontWeight.bold,
-                        letterSpacing: 1.2),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        isSearching ? 'SEARCH RESULTS' : 'SUGGESTED FOR YOU',
+                        style: const TextStyle(
+                            color: AppTheme.textSecondary,
+                            fontSize: 11,
+                            fontWeight: FontWeight.bold,
+                            letterSpacing: 1.2),
+                      ),
+                      if (isSearching &&
+                          !tmdbService.isLoading &&
+                          baseList.isNotEmpty)
+                        Text(
+                          '${baseList.length} found',
+                          style: const TextStyle(
+                              color: AppTheme.textSecondary,
+                              fontSize: 11,
+                              fontWeight: FontWeight.w500),
+                        ),
+                    ],
                   ),
                   const SizedBox(height: 12),
 
@@ -270,7 +285,7 @@ class _SearchScreenState extends State<SearchScreen> {
       style: const TextStyle(color: Colors.white),
       textInputAction: TextInputAction.search,
       decoration: InputDecoration(
-        hintText: 'Search movies, series, dramas...',
+        hintText: 'Search movies, series, actors...',
         hintStyle: const TextStyle(color: AppTheme.textSecondary, fontSize: 14),
         prefixIcon: const Icon(Icons.search_rounded, color: AppTheme.accent),
         suffixIcon: _searchController.text.isNotEmpty
@@ -278,6 +293,7 @@ class _SearchScreenState extends State<SearchScreen> {
           icon: const Icon(Icons.clear_rounded, color: AppTheme.textSecondary),
           onPressed: () {
             _searchController.clear();
+            _debounceTimer?.cancel();
             _runSearch('');
             setState(() {});
           },
@@ -521,6 +537,7 @@ class _PosterCard extends StatelessWidget {
     final voteAverage = (item['vote_average'] as num?)?.toDouble() ?? 0.0;
     final rating = voteAverage > 0 ? voteAverage.toStringAsFixed(1) : '—';
     final mediaType = item['media_type'] as String?;
+    final matchedVia = item['_matchedVia'] as String?;
 
     final posterPath = item['poster_path'];
     final imageUrl = posterPath != null
@@ -587,6 +604,45 @@ class _PosterCard extends StatelessWidget {
                                   color: Colors.white,
                                   fontSize: 9,
                                   fontWeight: FontWeight.bold),
+                            ),
+                          ),
+                        ),
+                      // NEW: shows why a result appeared when it was pulled in
+                      // via an actor/cast match rather than a title match
+                      if (matchedVia != null && matchedVia.isNotEmpty)
+                        Positioned(
+                          top: 8,
+                          right: 8,
+                          child: ConstrainedBox(
+                            constraints: const BoxConstraints(maxWidth: 96),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 6, vertical: 3),
+                              decoration: BoxDecoration(
+                                color: Colors.black.withOpacity(0.72),
+                                borderRadius: BorderRadius.circular(6),
+                                border: Border.all(
+                                    color: AppTheme.accent.withOpacity(0.4)),
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  const Icon(Icons.person_rounded,
+                                      size: 10, color: AppTheme.accent),
+                                  const SizedBox(width: 3),
+                                  Flexible(
+                                    child: Text(
+                                      matchedVia,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: const TextStyle(
+                                          color: Colors.white,
+                                          fontSize: 9,
+                                          fontWeight: FontWeight.w600),
+                                    ),
+                                  ),
+                                ],
+                              ),
                             ),
                           ),
                         ),
