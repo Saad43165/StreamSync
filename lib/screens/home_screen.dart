@@ -1,7 +1,10 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:ui';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:provider/provider.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 import '../services/tmdb_service.dart';
 import '../services/database_service.dart';
 import 'filtered_results_screen.dart';
@@ -15,1228 +18,1354 @@ import 'watch_history_screen.dart';
 import 'settings_screen.dart';
 import 'login_screen.dart';
 import 'downloads_screen.dart';
+import 'search_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
-
   @override
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
-class _HomeScreenState extends State<HomeScreen> {
+class _HomeScreenState extends State<HomeScreen>
+    with TickerProviderStateMixin, WidgetsBindingObserver {
+
+  // ── Connection ────────────────────────────────────────────────────────────
   bool _isOffline = false;
+
+  // ── Hero carousel ─────────────────────────────────────────────────────────
   late PageController _pageController;
   Timer? _carouselTimer;
   int _currentPage = 0;
+  bool _isCarouselActive = true;
 
-  // GlobalKeys for Section Navigation
-  final GlobalKey _trendingKey = GlobalKey();
-  final GlobalKey _moviesKey = GlobalKey();
-  final GlobalKey _seriesKey = GlobalKey();
-  final GlobalKey _netflixKey = GlobalKey();
-  final GlobalKey _primeKey = GlobalKey();
-  final GlobalKey _disneyKey = GlobalKey();
-  final GlobalKey _actionKey = GlobalKey();
-  final GlobalKey _comedyKey = GlobalKey();
-  final GlobalKey _scifiKey = GlobalKey();
-  final GlobalKey _horrorKey = GlobalKey();
-  final GlobalKey _upcomingKey = GlobalKey();
-  final GlobalKey _freeKey = GlobalKey();
+  // ── Scroll / app-bar fade ─────────────────────────────────────────────────
+  final ScrollController _scrollController = ScrollController();
+  double _appBarOpacity = 0.0;
+
+  // ── Section keys (for pill navigation) ───────────────────────────────────
+  final GlobalKey _trendingKey   = GlobalKey();
+  final GlobalKey _moviesKey     = GlobalKey();
+  final GlobalKey _seriesKey     = GlobalKey();
+  final GlobalKey _netflixKey    = GlobalKey();
+  final GlobalKey _primeKey      = GlobalKey();
+  final GlobalKey _disneyKey     = GlobalKey();
+  final GlobalKey _actionKey     = GlobalKey();
+  final GlobalKey _comedyKey     = GlobalKey();
+  final GlobalKey _scifiKey      = GlobalKey();
+  final GlobalKey _horrorKey     = GlobalKey();
+  final GlobalKey _upcomingKey   = GlobalKey();
+  final GlobalKey _freeKey       = GlobalKey();
+  final GlobalKey _bollywoodKey  = GlobalKey();
+  final GlobalKey _pakistaniKey  = GlobalKey();
+
+  // ── Animations ────────────────────────────────────────────────────────────
+  late AnimationController _heroTextController;
+  late Animation<double>   _heroTextFade;
+  late Animation<Offset>   _heroTextSlide;
+
+  // ── Image URL helpers ─────────────────────────────────────────────────────
+  static String _imageUrl(String? path, {int width = 500, bool isBackdrop = false}) {
+    if (path == null || path.isEmpty) {
+      return isBackdrop
+          ? 'https://images.unsplash.com/photo-1594909122845-11baa439b7bf?w=1200'
+          : 'https://images.unsplash.com/photo-1489599849927-2ee91cede3ba?w=300';
+    }
+    if (path.startsWith('http')) return path;
+    final size = isBackdrop ? 'w1280' : 'w$width';
+    return 'https://image.tmdb.org/t/p/$size$path';
+  }
 
   @override
   void initState() {
     super.initState();
-    _pageController = PageController(initialPage: 0);
+    WidgetsBinding.instance.addObserver(this);
+    _pageController = PageController();
+
+    _heroTextController = AnimationController(
+        vsync: this, duration: const Duration(milliseconds: 600));
+    _heroTextFade = CurvedAnimation(
+        parent: _heroTextController, curve: Curves.easeOut);
+    _heroTextSlide = Tween<Offset>(
+        begin: const Offset(0, 0.18), end: Offset.zero)
+        .animate(CurvedAnimation(
+        parent: _heroTextController, curve: Curves.easeOut));
+
+    _scrollController.addListener(_onScroll);
     _initApp();
   }
 
   @override
   void dispose() {
-    _pageController.dispose();
+    WidgetsBinding.instance.removeObserver(this);
+    _isCarouselActive = false;
     _carouselTimer?.cancel();
+    _pageController.dispose();
+    _scrollController.dispose();
+    _heroTextController.dispose();
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.paused || state == AppLifecycleState.inactive) {
+      _carouselTimer?.cancel();
+    } else if (state == AppLifecycleState.resumed) {
+      _startCarouselTimer(Provider.of<TMDBService>(context, listen: false).trending.take(6).length);
+    }
+  }
+
+  void _onScroll() {
+    final opacity = (_scrollController.offset / 120).clamp(0.0, 1.0);
+    if ((opacity - _appBarOpacity).abs() > 0.01) {
+      setState(() => _appBarOpacity = opacity);
+    }
   }
 
   Future<void> _initApp() async {
     await _checkConnection();
     if (mounted) {
-      Provider.of<TMDBService>(context, listen: false).fetchTrending();
+      final tmdb = Provider.of<TMDBService>(context, listen: false);
+      await tmdb.fetchTrending();
+      if (mounted) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          _startCarouselTimer(tmdb.trending.take(6).length);
+          _heroTextController.forward();
+        });
+      }
     }
   }
 
   Future<void> _checkConnection() async {
     try {
-      final result = await InternetAddress.lookup('google.com').timeout(const Duration(seconds: 4));
+      final result = await InternetAddress.lookup('google.com')
+          .timeout(const Duration(seconds: 4));
       if (mounted) {
-        setState(() {
-          _isOffline = result.isEmpty || result[0].rawAddress.isEmpty;
-        });
+        setState(() =>
+        _isOffline = result.isEmpty || result[0].rawAddress.isEmpty);
       }
     } catch (_) {
-      if (mounted) {
-        setState(() {
-          _isOffline = true;
-        });
-      }
+      if (mounted) setState(() => _isOffline = true);
     }
   }
 
-  void _startCarouselTimer(int itemCount) {
+  void _startCarouselTimer(int count) {
     _carouselTimer?.cancel();
-    if (itemCount <= 1) return;
-    _carouselTimer = Timer.periodic(const Duration(seconds: 5), (timer) {
-      if (_pageController.hasClients) {
-        final nextPage = (_currentPage + 1) % itemCount;
-        _pageController.animateToPage(
-          nextPage,
-          duration: const Duration(milliseconds: 800),
-          curve: Curves.fastOutSlowIn,
-        );
-      }
+    if (count <= 1 || !_isCarouselActive) return;
+    _carouselTimer = Timer.periodic(const Duration(seconds: 6), (_) {
+      if (!_isCarouselActive || !_pageController.hasClients) return;
+      final next = (_currentPage + 1) % count;
+      _pageController.animateToPage(next,
+          duration: const Duration(milliseconds: 700),
+          curve: Curves.fastOutSlowIn);
     });
   }
 
   void _scrollToSection(GlobalKey key) {
-    if (key.currentContext != null) {
-      Scrollable.ensureVisible(
-        key.currentContext!,
-        duration: const Duration(milliseconds: 800),
-        curve: Curves.easeInOutCubic,
-      );
-    }
+    final ctx = key.currentContext;
+    if (ctx == null) return;
+    Scrollable.ensureVisible(ctx,
+        duration: const Duration(milliseconds: 700),
+        curve: Curves.easeInOutCubic);
   }
 
+  // ── Colors ────────────────────────────────────────────────────────────────
+  static const Color _bg       = Color(0xFF080810);
+  static const Color _surface  = Color(0xFF0F0F1E);
+  static const Color _card     = Color(0xFF14142A);
+  static const Color _dimText  = Color(0xFF8888AA);
+  static const Color _gold     = Color(0xFFF5C842);
+
+  // ─────────────────────────────────────────────────────────────────────────
   @override
   Widget build(BuildContext context) {
-    final tmdbService = Provider.of<TMDBService>(context);
-    final dbService = Provider.of<DatabaseService>(context);
-    final trendingList = tmdbService.trending;
-    final carouselItems = trendingList.take(5).toList();
+    final tmdb     = Provider.of<TMDBService>(context);
+    final db       = Provider.of<DatabaseService>(context);
+    final trending = tmdb.trending;
+    final carousel = trending.take(6).toList();
 
     return Scaffold(
-      extendBodyBehindAppBar: true, // Transparent overlay design
-      drawer: _buildDrawer(context),
-      appBar: AppBar(
-        backgroundColor: Colors.transparent,
-        elevation: 0,
-        leading: Builder(
-          builder: (context) => IconButton(
-            icon: const Icon(Icons.menu_rounded, color: Colors.white, size: 28),
-            onPressed: () => Scaffold.of(context).openDrawer(),
+      backgroundColor: _bg,
+      extendBodyBehindAppBar: true,
+      drawer: _buildDrawer(context, db),
+
+      // ── Frosted glass app-bar that fades in on scroll ──────────────────
+      appBar: PreferredSize(
+        preferredSize: const Size.fromHeight(60),
+        child: AnimatedOpacity(
+          opacity: _appBarOpacity,
+          duration: const Duration(milliseconds: 80),
+          child: ClipRect(
+            child: BackdropFilter(
+              filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
+              child: Container(
+                color: _bg.withOpacity(0.72),
+                child: SafeArea(
+                  bottom: false,
+                  child: SizedBox(
+                    height: 60,
+                    child: Row(children: [
+                      Builder(builder: (ctx) => IconButton(
+                        icon: const Icon(Icons.menu_rounded,
+                            color: Colors.white, size: 24),
+                        onPressed: () => Scaffold.of(ctx).openDrawer(),
+                      )),
+                      const Spacer(),
+                      RichText(text: TextSpan(children: [
+                        TextSpan(
+                          text: 'Cine',
+                          style: TextStyle(
+                            fontSize: 20,
+                            fontWeight: FontWeight.w300,
+                            color: Colors.white.withOpacity(0.9),
+                            letterSpacing: 1,
+                          ),
+                        ),
+                        const TextSpan(
+                          text: 'Sync',
+                          style: TextStyle(
+                            fontSize: 20,
+                            fontWeight: FontWeight.w800,
+                            color: Colors.white,
+                            letterSpacing: 1,
+                          ),
+                        ),
+                      ])),
+                      const Spacer(),
+                      IconButton(
+                        icon: Icon(Icons.search_rounded,
+                            color: Colors.white.withOpacity(0.8), size: 24),
+                        onPressed: () => Navigator.push(context,
+                            MaterialPageRoute(
+                                builder: (_) => const SearchScreen())),
+                      ),
+                    ]),
+                  ),
+                ),
+              ),
+            ),
           ),
         ),
-        title: const Text(
-          'CineSync',
-          style: TextStyle(fontWeight: FontWeight.bold, letterSpacing: 1.5, fontSize: 20),
-        ),
       ),
+
       body: RefreshIndicator(
+        color: AppTheme.accent,
+        backgroundColor: _surface,
         onRefresh: () async {
           await _checkConnection();
-          if (mounted) {
-            await tmdbService.fetchTrending();
-          }
+          if (mounted) await tmdb.fetchTrending();
         },
-        child: SingleChildScrollView(
-          physics: const AlwaysScrollableScrollPhysics(),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // 1. Offline warning banner
-              if (_isOffline) _buildOfflineStrip(context),
+        child: CustomScrollView(
+          controller: _scrollController,
+          physics: const AlwaysScrollableScrollPhysics(
+              parent: BouncingScrollPhysics()),
+          slivers: [
 
-              // API Key Warning Banner
-              if (!tmdbService.hasApiKey && !_isOffline) _buildApiKeyWarning(context),
-
-              // 2. Hero Carousel (Swiping top 5 trending movies)
-              tmdbService.isLoading
+            // ── 1. Full-bleed hero carousel ──────────────────────────────
+            SliverToBoxAdapter(
+              child: tmdb.isLoading
                   ? ShimmerLoadingPresets.heroBannerSkeleton()
-                  : trendingList.isEmpty
-                      ? const SizedBox(
-                          height: 300,
-                          child: Center(child: Text('No trending titles found.')),
-                        )
-                      : _buildHeroCarousel(context, carouselItems),
-
-              // 2.5 Dynamic Continue Watching System (Watch History)
-              _buildContinueWatchingSection(context, dbService),
-
-              const SizedBox(height: 16),
-
-              // Genres Row
-              _buildGenresRow(context),
-
-              const SizedBox(height: 12),
-
-              // Years Row
-              _buildYearsRow(context),
-
-              const SizedBox(height: 24),
-
-              // 3. Dynamic Section Navigation Chips
-              _buildNavigationPills(context),
-
-              const SizedBox(height: 24),
-
-              // 4. Trending Now Row
-              _buildSectionTitle(context, 'Trending Today', key: _trendingKey, items: trendingList),
-              const SizedBox(height: 12),
-              tmdbService.isLoading
-                  ? ShimmerLoadingPresets.horizontalPostersSkeleton()
-                  : _buildHorizontalSection(context, items: trendingList),
-
-              const SizedBox(height: 24),
-
-              // 5. Movies Section
-              _buildSectionTitle(context, 'Blockbuster Movies', key: _moviesKey, items: tmdbService.movies),
-              const SizedBox(height: 12),
-              tmdbService.isLoading
-                  ? ShimmerLoadingPresets.horizontalPostersSkeleton()
-                  : _buildHorizontalSection(context, items: tmdbService.movies),
-
-              const SizedBox(height: 24),
-
-              // 6. TV Series Section
-              _buildSectionTitle(context, 'Trending TV Shows & Series', key: _seriesKey, items: tmdbService.series),
-              const SizedBox(height: 12),
-              tmdbService.isLoading
-                  ? ShimmerLoadingPresets.horizontalPostersSkeleton()
-                  : _buildHorizontalSection(context, items: tmdbService.series),
-
-              const SizedBox(height: 24),
-
-              // Bollywood Hits Section
-              _buildSectionTitle(context, 'Bollywood Blockbusters', key: GlobalKey(), items: tmdbService.bollywood),
-              const SizedBox(height: 12),
-              tmdbService.isLoading
-                  ? ShimmerLoadingPresets.horizontalPostersSkeleton()
-                  : _buildHorizontalSection(context, items: tmdbService.bollywood),
-
-              const SizedBox(height: 24),
-
-              // Pakistani Dramas & Movies Section
-              _buildSectionTitle(context, 'Pakistani Dramas & Movies', key: GlobalKey(), items: tmdbService.pakistani),
-              const SizedBox(height: 12),
-              tmdbService.isLoading
-                  ? ShimmerLoadingPresets.horizontalPostersSkeleton()
-                  : _buildHorizontalSection(context, items: tmdbService.pakistani),
-
-              const SizedBox(height: 24),
-
-              // 7. Upcoming Releases Section
-              _buildUpcomingSection(context, tmdbService),
-
-              const SizedBox(height: 24),
-
-              // 8. Netflix Section
-              _buildPlatformSectionTitle(context, 'Streaming on Netflix', Colors.redAccent, key: _netflixKey, items: tmdbService.netflix),
-              const SizedBox(height: 12),
-              tmdbService.isLoading
-                  ? ShimmerLoadingPresets.horizontalPostersSkeleton()
-                  : _buildHorizontalSection(context, items: tmdbService.netflix),
-
-              const SizedBox(height: 24),
-
-              // 9. Amazon Prime Section
-              _buildPlatformSectionTitle(context, 'Streaming on Prime Video', Colors.lightBlueAccent, key: _primeKey, items: tmdbService.prime),
-              const SizedBox(height: 12),
-              tmdbService.isLoading
-                  ? ShimmerLoadingPresets.horizontalPostersSkeleton()
-                  : _buildHorizontalSection(context, items: tmdbService.prime),
-
-              const SizedBox(height: 24),
-
-              // 10. Disney+ Section
-              _buildPlatformSectionTitle(context, 'Streaming on Disney+', Colors.blueAccent, key: _disneyKey, items: tmdbService.disney),
-              const SizedBox(height: 12),
-              tmdbService.isLoading
-                  ? ShimmerLoadingPresets.horizontalPostersSkeleton()
-                  : _buildHorizontalSection(context, items: tmdbService.disney),
-
-              const SizedBox(height: 24),
-
-              // 11. Action Movies Section
-              _buildSectionTitle(context, 'Action-Packed Thrillers', key: _actionKey, items: tmdbService.actionMovies),
-              const SizedBox(height: 12),
-              tmdbService.isLoading
-                  ? ShimmerLoadingPresets.horizontalPostersSkeleton()
-                  : _buildHorizontalSection(context, items: tmdbService.actionMovies),
-
-              const SizedBox(height: 24),
-
-              // 12. Comedy Movies Section
-              _buildSectionTitle(context, 'Hit Comedies & Laughs', key: _comedyKey, items: tmdbService.comedyMovies),
-              const SizedBox(height: 12),
-              tmdbService.isLoading
-                  ? ShimmerLoadingPresets.horizontalPostersSkeleton()
-                  : _buildHorizontalSection(context, items: tmdbService.comedyMovies),
-
-              const SizedBox(height: 24),
-
-              // 13. Sci-Fi Section
-              _buildSectionTitle(context, 'Sci-Fi & Cyberpunk', key: _scifiKey, items: tmdbService.scifiMovies),
-              const SizedBox(height: 12),
-              tmdbService.isLoading
-                  ? ShimmerLoadingPresets.horizontalPostersSkeleton()
-                  : _buildHorizontalSection(context, items: tmdbService.scifiMovies),
-
-              const SizedBox(height: 24),
-
-              // 14. Horror Section
-              _buildSectionTitle(context, 'Spooky Horror & Mystery', key: _horrorKey, items: tmdbService.horrorMovies),
-              const SizedBox(height: 12),
-              tmdbService.isLoading
-                  ? ShimmerLoadingPresets.horizontalPostersSkeleton()
-                  : _buildHorizontalSection(context, items: tmdbService.horrorMovies),
-
-              const SizedBox(height: 24),
-
-              // 15. Free to Watch Row
-              Padding(
-                key: _freeKey,
-                padding: const EdgeInsets.symmetric(horizontal: 20),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Row(
-                      children: [
-                        Text(
-                          'Free to Watch',
-                          style: Theme.of(context).textTheme.headlineMedium?.copyWith(
-                                fontSize: 18,
-                                fontWeight: FontWeight.bold,
-                              ),
-                        ),
-                        const SizedBox(width: 8),
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                          decoration: BoxDecoration(
-                            color: Colors.greenAccent.withValues(alpha: 0.15),
-                            borderRadius: BorderRadius.circular(6),
-                            border: Border.all(color: Colors.greenAccent.withValues(alpha: 0.3)),
-                          ),
-                          child: const Text(
-                            'NO COST',
-                            style: TextStyle(
-                              color: Colors.greenAccent,
-                              fontSize: 9,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                    GestureDetector(
-                      onTap: () {
-                        final freeList = tmdbService.hasApiKey
-                            ? trendingList
-                            : trendingList.where((item) => item['id'] == 1 || item['id'] == 2 || item['id'] == 4).toList();
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (context) => SeeAllScreen(
-                              categoryTitle: 'Free Content',
-                              initialItems: freeList,
-                            ),
-                          ),
-                        );
-                      },
-                      child: const Row(
-                        children: [
-                          Text(
-                            'See All',
-                            style: TextStyle(color: Colors.greenAccent, fontSize: 13, fontWeight: FontWeight.bold),
-                          ),
-                          SizedBox(width: 4),
-                          Icon(Icons.arrow_forward_ios_rounded, color: Colors.greenAccent, size: 10),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 12),
-              tmdbService.isLoading
-                  ? ShimmerLoadingPresets.horizontalPostersSkeleton()
-                  : _buildHorizontalSection(
-                      context,
-                      items: tmdbService.hasApiKey
-                          ? trendingList
-                          : trendingList.where((item) => item['id'] == 1 || item['id'] == 2 || item['id'] == 4).toList(),
-                      showFreeBadge: true,
-                    ),
-
-              const SizedBox(height: 30),
-
-              // 16. Premium sponsor promotional banner
-
-              const SizedBox(height: 110),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildContinueWatchingSection(BuildContext context, DatabaseService dbService) {
-    final history = dbService.watchHistory;
-    if (history.isEmpty) return const SizedBox.shrink();
-
-    final isLive = Provider.of<TMDBService>(context, listen: false).hasApiKey;
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const SizedBox(height: 24),
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 20),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              const Text(
-                'Continue Watching',
-                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white),
-              ),
-              GestureDetector(
-                onTap: () {
-                  dbService.clearDatabase(); // Resets history
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Watch history cleared.')),
-                  );
-                },
-                child: Text(
-                  'Clear All',
-                  style: TextStyle(color: Colors.white.withValues(alpha: 0.4), fontSize: 12),
-                ),
-              ),
-            ],
-          ),
-        ),
-        const SizedBox(height: 12),
-        SizedBox(
-          height: 130,
-          child: ListView.builder(
-            scrollDirection: Axis.horizontal,
-            padding: const EdgeInsets.symmetric(horizontal: 12),
-            itemCount: history.length,
-            itemBuilder: (context, index) {
-              final item = history[index];
-              final name = item['title'] ?? 'Untitled';
-              final posterPath = item['poster_path'];
-              final imageUrl = isLive && posterPath != null
-                  ? (posterPath.toString().startsWith('http') ? posterPath : '${TMDBService.imageBaseUrl}$posterPath')
-                  : (posterPath ?? 'https://images.unsplash.com/photo-1489599849927-2ee91cede3ba?w=300');
-
-              final episodeLabel = item['media_type'] == 'tv'
-                  ? 'Season ${item['season'] ?? 1}, Episode ${item['episode'] ?? 1}'
-                  : 'Movie Stream';
-
-              final progress = item['progress_seconds'] as int? ?? 0;
-              final duration = item['duration_seconds'] as int? ?? 0;
-              final double percent = duration > 0 ? (progress / duration).clamp(0.0, 1.0) : 0.0;
-              final int remaining = duration > progress ? duration - progress : 0;
-              final String remainingLabel = remaining > 0
-                  ? '${(remaining / 60).floor()}m left'
-                  : percent > 0 ? 'Watched' : 'Start';
-
-              return Dismissible(
-                key: Key('continue_${item['id']}'),
-                direction: DismissDirection.up,
-                onDismissed: (_) => dbService.removeFromHistory(item['id']),
-                child: GestureDetector(
-                  onTap: () {
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (context) => DetailsScreen(
-                          id: item['id'],
-                          mediaType: item['media_type'] ?? 'movie',
-                        ),
-                      ),
-                    );
-                  },
-                  child: Container(
-                    width: 210,
-                    margin: const EdgeInsets.symmetric(horizontal: 6),
-                    decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(14),
-                      boxShadow: [BoxShadow(color: Colors.black54, blurRadius: 8, offset: const Offset(0, 4))],
-                    ),
-                    child: ClipRRect(
-                      borderRadius: BorderRadius.circular(14),
-                      child: Stack(
-                        fit: StackFit.expand,
-                        children: [
-                          Image.network(imageUrl, fit: BoxFit.cover,
-                            errorBuilder: (_, __, ___) => Container(color: AppTheme.surface)),
-                          Container(
-                            decoration: const BoxDecoration(
-                              gradient: LinearGradient(
-                                colors: [Colors.transparent, Colors.black87],
-                                begin: Alignment.topCenter, end: Alignment.bottomCenter,
-                                stops: [0.3, 1.0],
-                              ),
-                            ),
-                          ),
-                          // Play button
-                          const Center(child: Icon(Icons.play_circle_fill_rounded, color: Colors.white, size: 40)),
-                          // Info bar at bottom
-                          Positioned(
-                            bottom: percent > 0 ? 6 : 12,
-                            left: 10, right: 10,
-                            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                              Text(name, maxLines: 1, overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white, fontSize: 12)),
-                              Row(
-                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                children: [
-                                  Text(episodeLabel,
-                                    style: const TextStyle(color: AppTheme.accent, fontSize: 10, fontWeight: FontWeight.bold)),
-                                  Container(
-                                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                                    decoration: BoxDecoration(
-                                      color: Colors.black54,
-                                      borderRadius: BorderRadius.circular(8),
-                                    ),
-                                    child: Text(remainingLabel,
-                                      style: const TextStyle(color: Colors.white70, fontSize: 9, fontWeight: FontWeight.w600)),
-                                  ),
-                                ],
-                              ),
-                            ]),
-                          ),
-                          // Progress bar
-                          Positioned(
-                            bottom: 0, left: 0, right: 0,
-                            child: LinearProgressIndicator(
-                              value: percent,
-                              backgroundColor: Colors.white24,
-                              valueColor: const AlwaysStoppedAnimation<Color>(AppTheme.accent),
-                              minHeight: 4,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-              );
-            },
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildUpcomingSection(BuildContext context, TMDBService tmdbService) {
-    final list = tmdbService.upcoming;
-    if (list.isEmpty) return const SizedBox.shrink();
-
-    final isLive = tmdbService.hasApiKey;
-
-    return Column(
-      key: _upcomingKey,
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 20),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              const Text(
-                'Upcoming Releases',
-                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white),
-              ),
-              GestureDetector(
-                onTap: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (context) => const UpcomingReleasesScreen(),
-                    ),
-                  );
-                },
-                child: const Row(
-                  children: [
-                    Text(
-                      'See All',
-                      style: TextStyle(color: AppTheme.accent, fontSize: 13, fontWeight: FontWeight.bold),
-                    ),
-                    SizedBox(width: 4),
-                    Icon(Icons.arrow_forward_ios_rounded, color: AppTheme.accent, size: 10),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        ),
-        const SizedBox(height: 12),
-        SizedBox(
-          height: 250,
-          child: ListView.builder(
-            scrollDirection: Axis.horizontal,
-            padding: const EdgeInsets.symmetric(horizontal: 12),
-            itemCount: list.length,
-            itemBuilder: (context, index) {
-              final item = list[index];
-              final name = item['title'] ?? 'Upcoming Title';
-              final posterPath = item['poster_path'];
-              final imageUrl = isLive && posterPath != null
-                  ? (posterPath.toString().startsWith('http') ? posterPath : '${TMDBService.imageBaseUrl}$posterPath')
-                  : (posterPath ?? 'https://images.unsplash.com/photo-1489599849927-2ee91cede3ba?w=300');
-
-              final releaseDate = item['release_date'] ?? 'Coming Soon';
-
-              return GestureDetector(
-                onTap: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (context) => DetailsScreen(
-                        id: item['id'],
-                        mediaType: 'movie',
-                        posterUrl: imageUrl,
-                      ),
-                    ),
-                  );
-                },
-                child: Container(
-                  width: 130,
-                  margin: const EdgeInsets.symmetric(horizontal: 8),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Expanded(
-                        child: Hero(
-                          tag: 'poster_${item['id']}',
-                          child: ClipRRect(
-                            borderRadius: BorderRadius.circular(12),
-                          child: Stack(
-                            fit: StackFit.expand,
-                            children: [
-                              Image.network(
-                                imageUrl,
-                                fit: BoxFit.cover,
-                              ),
-                              Positioned(
-                                top: 8,
-                                right: 8,
-                                child: Container(
-                                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                                  decoration: BoxDecoration(
-                                    color: Colors.blueAccent.shade700,
-                                    borderRadius: BorderRadius.circular(4),
-                                  ),
-                                  child: const Text(
-                                    'NEW',
-                                    style: TextStyle(color: Colors.white, fontSize: 8, fontWeight: FontWeight.bold),
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                        ),
-                      ),
-                      const SizedBox(height: 6),
-                      Text(
-                        name,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.white),
-                      ),
-                      Text(
-                        'Releasing: $releaseDate',
-                        style: const TextStyle(fontSize: 10, color: AppTheme.accent, fontWeight: FontWeight.bold),
-                      ),
-                    ],
-                  ),
-                ),
-              );
-            },
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildNavigationPills(BuildContext context) {
-    final List<Map<String, dynamic>> pills = [
-      {'label': 'Trending', 'key': _trendingKey},
-      {'label': 'Movies', 'key': _moviesKey},
-      {'label': 'TV Shows', 'key': _seriesKey},
-      {'label': 'Upcoming', 'key': _upcomingKey, 'color': Colors.amberAccent},
-      {'label': 'Netflix', 'key': _netflixKey, 'color': Colors.redAccent},
-      {'label': 'Prime', 'key': _primeKey, 'color': Colors.lightBlueAccent},
-      {'label': 'Disney+', 'key': _disneyKey, 'color': Colors.blueAccent},
-      {'label': 'Action', 'key': _actionKey},
-      {'label': 'Comedy', 'key': _comedyKey},
-      {'label': 'Sci-Fi', 'key': _scifiKey},
-      {'label': 'Horror', 'key': _horrorKey},
-      {'label': 'Free', 'key': _freeKey, 'color': Colors.greenAccent},
-    ];
-
-    return SizedBox(
-      height: 48,
-      child: ListView.builder(
-        scrollDirection: Axis.horizontal,
-        padding: const EdgeInsets.symmetric(horizontal: 16),
-        itemCount: pills.length,
-        itemBuilder: (context, index) {
-          final pill = pills[index];
-          final accentColor = pill['color'] as Color? ?? AppTheme.accent;
-          return Padding(
-            padding: const EdgeInsets.only(right: 8.0),
-            child: ActionChip(
-              onPressed: () => _scrollToSection(pill['key'] as GlobalKey),
-              avatar: _buildPillAvatar(pill['label'] as String, accentColor),
-              label: Text(
-                pill['label'] as String,
-                style: const TextStyle(
-                  color: AppTheme.textPrimary,
-                  fontSize: 12,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-              backgroundColor: Colors.white.withValues(alpha: 0.04),
-              side: BorderSide(color: Colors.white.withValues(alpha: 0.08)),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(20),
-              ),
+                  : trending.isEmpty
+                  ? const SizedBox(
+                  height: 300,
+                  child: Center(
+                    child: Text('No trending titles.',
+                        style: TextStyle(color: _dimText)),
+                  ))
+                  : _buildHeroCarousel(context, carousel),
             ),
-          );
-        },
-      ),
-    );
-  }
 
-  Widget _buildPillAvatar(String label, Color defaultColor) {
-    String url = '';
-    switch (label.toLowerCase()) {
-      case 'netflix':
-        url = 'https://upload.wikimedia.org/wikipedia/commons/f/ff/Netflix-new-icon.png';
-        break;
-      case 'prime':
-        url = 'https://upload.wikimedia.org/wikipedia/commons/d/de/Amazon_icon.png';
-        break;
-      case 'disney+':
-        url = 'https://upload.wikimedia.org/wikipedia/commons/3/3e/Disney%2B_logo.png';
-        break;
-      case 'free':
-        return Icon(Icons.card_giftcard_rounded, color: defaultColor, size: 14);
-      case 'tv shows':
-        return Icon(Icons.tv_rounded, color: defaultColor, size: 14);
-      case 'movies':
-        return Icon(Icons.movie_rounded, color: defaultColor, size: 14);
-      case 'trending':
-        return Icon(Icons.trending_up_rounded, color: defaultColor, size: 14);
-      case 'upcoming':
-        return Icon(Icons.event_note_rounded, color: defaultColor, size: 14);
-      case 'action':
-        return Icon(Icons.sports_martial_arts_rounded, color: defaultColor, size: 14);
-      case 'comedy':
-        return Icon(Icons.emoji_emotions_rounded, color: defaultColor, size: 14);
-      case 'sci-fi':
-        return Icon(Icons.rocket_launch_rounded, color: defaultColor, size: 14);
-      case 'horror':
-        return Icon(Icons.dangerous_rounded, color: defaultColor, size: 14);
-    }
+            // ── 2. Status banners ────────────────────────────────────────
+            if (_isOffline)
+              SliverToBoxAdapter(child: _buildOfflineStrip()),
+            if (!tmdb.hasApiKey && !_isOffline)
+              SliverToBoxAdapter(child: _buildApiKeyWarning()),
 
-    if (url.isNotEmpty) {
-      return Image.network(
-        url,
-        width: 14,
-        height: 14,
-        fit: BoxFit.contain,
-        errorBuilder: (_, __, ___) => Icon(Icons.play_arrow_rounded, color: defaultColor, size: 14),
-      );
-    }
-    return Icon(Icons.play_arrow_rounded, color: defaultColor, size: 14);
-  }
+            // ── 3. Continue Watching ─────────────────────────────────────
+            SliverToBoxAdapter(
+                child: _buildContinueWatching(context, db, tmdb)),
 
-  Widget _buildSectionTitle(BuildContext context, String text, {required GlobalKey key, required List<dynamic> items}) {
-    return Padding(
-      key: key,
-      padding: const EdgeInsets.symmetric(horizontal: 20),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          Text(
-            text,
-            style: Theme.of(context).textTheme.headlineMedium?.copyWith(
-                  fontSize: 18,
-                  fontWeight: FontWeight.bold,
-                ),
-          ),
-          if (items.isNotEmpty)
-            GestureDetector(
-              onTap: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (context) => SeeAllScreen(
-                      categoryTitle: text,
-                      initialItems: items,
-                    ),
-                  ),
-                );
-              },
-              child: const Row(
-                children: [
-                  Text(
-                    'See All',
-                    style: TextStyle(color: AppTheme.accent, fontSize: 13, fontWeight: FontWeight.bold),
-                  ),
-                  SizedBox(width: 4),
-                  Icon(Icons.arrow_forward_ios_rounded, color: AppTheme.accent, size: 10),
-                ],
-              ),
-            ),
-        ],
-      ),
-    );
-  }
+            // ── 4. Genre pills ───────────────────────────────────────────
+            SliverToBoxAdapter(child: _buildGenreStrip(context)),
 
-  Widget _buildPlatformSectionTitle(BuildContext context, String text, Color accentColor, {required GlobalKey key, required List<dynamic> items}) {
-    return Padding(
-      key: key,
-      padding: const EdgeInsets.symmetric(horizontal: 20),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          Row(
-            children: [
-              Container(
-                width: 4,
-                height: 18,
-                decoration: BoxDecoration(
-                  color: accentColor,
-                  borderRadius: BorderRadius.circular(2),
-                ),
-              ),
-              const SizedBox(width: 8),
-              Text(
-                text,
-                style: Theme.of(context).textTheme.headlineMedium?.copyWith(
-                      fontSize: 18,
-                      fontWeight: FontWeight.bold,
-                    ),
-              ),
-            ],
-          ),
-          if (items.isNotEmpty)
-            GestureDetector(
-              onTap: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (context) => SeeAllScreen(
-                      categoryTitle: text,
-                      initialItems: items,
-                    ),
-                  ),
-                );
-              },
-              child: Row(
-                children: [
-                  Text(
-                    'See All',
-                    style: TextStyle(color: accentColor, fontSize: 13, fontWeight: FontWeight.bold),
-                  ),
-                  const SizedBox(width: 4),
-                  Icon(Icons.arrow_forward_ios_rounded, color: accentColor, size: 10),
-                ],
-              ),
-            ),
-        ],
-      ),
-    );
-  }
+            // ── 5. Year chips ────────────────────────────────────────────
+            SliverToBoxAdapter(child: _buildYearStrip(context)),
 
-  Widget _buildOfflineStrip(BuildContext context) {
-    return SafeArea(
-      bottom: false,
-      child: Container(
-        width: double.infinity,
-        color: Colors.redAccent.shade700,
-        padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
-        child: const Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(Icons.wifi_off_rounded, color: Colors.white, size: 18),
-            SizedBox(width: 8),
-            Text(
-              'Device is Offline. Showing local watchlist content.',
-              style: TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold),
-            ),
+            // ── 6. Section jump pills ────────────────────────────────────
+            SliverToBoxAdapter(child: _buildJumpPills(context)),
+
+            // ── 7. Content rows ──────────────────────────────────────────
+            ..._contentRows(context, tmdb),
+
+            // bottom padding
+            const SliverToBoxAdapter(child: SizedBox(height: 110)),
           ],
         ),
       ),
     );
   }
 
-  Widget _buildApiKeyWarning(BuildContext context) {
-    return SafeArea(
-      bottom: false,
-      child: GlassCard(
-        margin: const EdgeInsets.fromLTRB(16, 90, 16, 0), // Adjusted top margin to fit translucent appBar
-        padding: const EdgeInsets.all(12),
-        borderColor: Colors.yellowAccent.withValues(alpha: 0.2),
-        child: Row(
-          children: [
-            const Icon(Icons.warning_amber_rounded, color: Colors.yellowAccent, size: 28),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text(
-                    'Viewing in Demo Mode',
-                    style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white, fontSize: 13),
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    'Enter a free TMDB API key in config.dart to unlock live global streams and search.',
-                    style: TextStyle(color: Colors.white.withValues(alpha: 0.7), fontSize: 11),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
+  // ─────────────────────────────────────────────────────────────────────────
+  // HERO CAROUSEL
+  // ─────────────────────────────────────────────────────────────────────────
   Widget _buildHeroCarousel(BuildContext context, List<dynamic> items) {
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _startCarouselTimer(items.length);
-    });
-
     return SizedBox(
-      height: 480,
-      width: double.infinity,
-      child: Stack(
-        children: [
-          PageView.builder(
+      height: MediaQuery.of(context).size.height * 0.68,
+      child: Stack(children: [
+        RepaintBoundary(
+          child: PageView.builder(
             controller: _pageController,
-            onPageChanged: (index) {
-              setState(() {
-                _currentPage = index;
-              });
-            },
             itemCount: items.length,
-            itemBuilder: (context, index) {
-              final item = items[index];
-              return _buildHeroSlide(context, item);
+            onPageChanged: (i) {
+              setState(() => _currentPage = i);
+              _heroTextController
+                ..reset()
+                ..forward();
             },
+            itemBuilder: (ctx, i) => _buildHeroSlide(ctx, items[i], i),
           ),
-          
-          Positioned(
-            bottom: 24,
-            right: 20,
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: List.generate(items.length, (index) {
-                final isSelected = _currentPage == index;
-                return AnimatedContainer(
-                  duration: const Duration(milliseconds: 300),
-                  margin: const EdgeInsets.symmetric(horizontal: 4),
-                  width: isSelected ? 18 : 6,
-                  height: 6,
-                  decoration: BoxDecoration(
-                    color: isSelected ? AppTheme.accent : Colors.white54,
-                    borderRadius: BorderRadius.circular(3),
+        ),
+
+        // Page indicator dots
+        Positioned(
+          bottom: 28,
+          left: 0, right: 0,
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: List.generate(items.length, (i) {
+              final sel = i == _currentPage;
+              return AnimatedContainer(
+                duration: const Duration(milliseconds: 300),
+                margin: const EdgeInsets.symmetric(horizontal: 3),
+                width: sel ? 22 : 5,
+                height: 5,
+                decoration: BoxDecoration(
+                  color: sel ? AppTheme.accent : Colors.white30,
+                  borderRadius: BorderRadius.circular(3),
+                ),
+              );
+            }),
+          ),
+        ),
+
+        // Transparent top area
+        Positioned(
+          top: 0, left: 0, right: 0,
+          child: SafeArea(
+            bottom: false,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(
+                  horizontal: 16, vertical: 10),
+              child: Row(children: [
+                Builder(builder: (ctx) => _glassCircleButton(
+                  Icons.menu_rounded,
+                      () => Scaffold.of(ctx).openDrawer(),
+                )),
+                const Spacer(),
+                RichText(text: TextSpan(children: [
+                  TextSpan(
+                    text: 'Cine',
+                    style: TextStyle(
+                      fontSize: 19,
+                      fontWeight: FontWeight.w300,
+                      color: Colors.white.withOpacity(0.85),
+                      letterSpacing: 0.5,
+                    ),
                   ),
-                );
-              }),
+                  const TextSpan(
+                    text: 'Sync',
+                    style: TextStyle(
+                      fontSize: 19,
+                      fontWeight: FontWeight.w800,
+                      color: Colors.white,
+                      letterSpacing: 0.5,
+                    ),
+                  ),
+                ])),
+                const Spacer(),
+                _glassCircleButton(Icons.search_rounded, () => Navigator.push(context,
+                    MaterialPageRoute(builder: (_) => const SearchScreen()))),
+              ]),
             ),
           ),
-        ],
+        ),
+      ]),
+    );
+  }
+
+  Widget _glassCircleButton(IconData icon, VoidCallback onTap) {
+    return GestureDetector(
+      onTap: onTap,
+      child: ClipOval(
+        child: BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
+          child: Container(
+            width: 40, height: 40,
+            decoration: BoxDecoration(
+              color: Colors.white.withOpacity(0.12),
+              shape: BoxShape.circle,
+              border: Border.all(
+                  color: Colors.white.withOpacity(0.15)),
+            ),
+            child: Icon(icon, color: Colors.white, size: 20),
+          ),
+        ),
       ),
     );
   }
 
-  Widget _buildHeroSlide(BuildContext context, dynamic item) {
-    final title = item['title'] ?? item['name'] ?? 'Untitled';
+  Widget _buildHeroSlide(BuildContext context, dynamic item, int index) {
+    final title    = item['title'] ?? item['name'] ?? 'Untitled';
     final overview = item['overview'] ?? '';
-    final ratingNum = (item['vote_average'] as num?)?.toDouble() ?? 0.0;
-    final rating = ratingNum.toStringAsFixed(1);
-    
-    final isLive = Provider.of<TMDBService>(context, listen: false).hasApiKey;
-    final backdropPath = item['backdrop_path'];
-    final imageUrl = isLive && backdropPath != null
-        ? (backdropPath.toString().startsWith('http') ? backdropPath : '${TMDBService.backdropBaseUrl}$backdropPath')
-        : (backdropPath ?? 'https://images.unsplash.com/photo-1594909122845-11baa439b7bf?w=800');
+    final rating   = (item['vote_average'] as num?)?.toDouble() ?? 0.0;
+    final imgUrl   = _imageUrl(item['backdrop_path'], isBackdrop: true);
 
     return GestureDetector(
-      onTap: () {
-        Navigator.push(
-          context,
-          MaterialPageRoute(
-            builder: (context) => DetailsScreen(
-              id: item['id'],
-              mediaType: item['media_type'] ?? 'movie',
-            ),
-          ),
-        );
-      },
-      child: Container(
-        width: double.infinity,
-        decoration: BoxDecoration(
-          image: DecorationImage(
-            image: NetworkImage(imageUrl),
-            fit: BoxFit.cover,
-          ),
+      onTap: () => _pushDetails(context, item),
+      child: Stack(fit: StackFit.expand, children: [
+        // Cached backdrop
+        CachedNetworkImage(
+          imageUrl: imgUrl,
+          fit: BoxFit.cover,
+          placeholder: (_, __) => Container(color: _card),
+          errorWidget: (_, __, ___) => Container(color: _card),
+          memCacheWidth: 640,
+          maxWidthDiskCache: 1280,
         ),
-        child: Container(
-          decoration: const BoxDecoration(
+
+        // Cinematic gradient
+        DecoratedBox(
+          decoration: BoxDecoration(
             gradient: LinearGradient(
               colors: [
-                Colors.black38,
-                Colors.black54,
-                AppTheme.background,
+                Colors.transparent,
+                _bg.withOpacity(0.25),
+                _bg.withOpacity(0.72),
+                _bg,
               ],
               begin: Alignment.topCenter,
               end: Alignment.bottomCenter,
+              stops: const [0.0, 0.42, 0.72, 1.0],
             ),
           ),
-          padding: const EdgeInsets.fromLTRB(20, 20, 20, 20),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.end,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                decoration: BoxDecoration(
-                  color: Colors.black54,
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: AppTheme.secondaryAccent.withValues(alpha: 0.3)),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    const Icon(Icons.star, color: AppTheme.secondaryAccent, size: 14),
-                    const SizedBox(width: 4),
-                    Text(
-                      rating,
-                      style: const TextStyle(
-                        color: AppTheme.textPrimary,
-                        fontWeight: FontWeight.bold,
-                        fontSize: 11,
+        ),
+
+        // Left-side vignette
+        DecoratedBox(
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              colors: [_bg.withOpacity(0.55), Colors.transparent],
+              begin: Alignment.centerLeft,
+              end: Alignment.centerRight,
+            ),
+          ),
+        ),
+
+        // Text content
+        Positioned(
+          left: 20, right: 80, bottom: 52,
+          child: SlideTransition(
+            position: _heroTextSlide,
+            child: FadeTransition(
+              opacity: _heroTextFade,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Row(children: [
+                    _heroBadge(
+                      child: Row(mainAxisSize: MainAxisSize.min, children: [
+                        const Icon(Icons.star_rounded,
+                            color: _gold, size: 12),
+                        const SizedBox(width: 4),
+                        Text(rating.toStringAsFixed(1),
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 11,
+                              fontWeight: FontWeight.bold,
+                            )),
+                      ]),
+                    ),
+                    const SizedBox(width: 8),
+                    _heroBadge(
+                      child: Text(
+                        item['media_type'] == 'tv' ? 'SERIES' : 'FILM',
+                        style: TextStyle(
+                          color: AppTheme.accent,
+                          fontSize: 10,
+                          fontWeight: FontWeight.bold,
+                          letterSpacing: 1.2,
+                        ),
                       ),
                     ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 10),
-              Text(
-                title,
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                  fontSize: 28,
-                  fontWeight: FontWeight.bold,
-                  color: AppTheme.textPrimary,
-                  shadows: [
-                    Shadow(blurRadius: 12, color: Colors.black, offset: Offset(0, 4)),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 8),
-              Text(
-                overview,
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                  fontSize: 13,
-                  color: AppTheme.textSecondary,
-                  height: 1.4,
-                ),
-              ),
-              const SizedBox(height: 16),
-              Row(
-                children: [
-                  ElevatedButton.icon(
-                    onPressed: () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (context) => DetailsScreen(
-                            id: item['id'],
-                            mediaType: item['media_type'] ?? 'movie',
+                  ]),
+                  const SizedBox(height: 10),
+                  Text(title,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontSize: 32,
+                        fontWeight: FontWeight.w900,
+                        color: Colors.white,
+                        height: 1.08,
+                        letterSpacing: -0.5,
+                        shadows: [
+                          Shadow(
+                              blurRadius: 20,
+                              color: Colors.black,
+                              offset: Offset(0, 4))
+                        ],
+                      )),
+                  const SizedBox(height: 10),
+                  Text(overview,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                          fontSize: 13,
+                          color: Color(0xAAFFFFFF),
+                          height: 1.5)),
+                  const SizedBox(height: 20),
+                  Row(children: [
+                    ElevatedButton.icon(
+                      onPressed: () => _pushDetails(context, item),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.white,
+                        foregroundColor: Colors.black,
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 22, vertical: 13),
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(10)),
+                        elevation: 0,
+                      ),
+                      icon: const Icon(Icons.play_arrow_rounded,
+                          size: 22, color: Colors.black),
+                      label: const Text('Watch Now',
+                          style: TextStyle(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 14,
+                              color: Colors.black)),
+                    ),
+                    const SizedBox(width: 12),
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(10),
+                      child: BackdropFilter(
+                        filter: ImageFilter.blur(sigmaX: 16, sigmaY: 16),
+                        child: GestureDetector(
+                          onTap: () => _pushDetails(context, item),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 18, vertical: 13),
+                            decoration: BoxDecoration(
+                              color: Colors.white.withOpacity(0.14),
+                              borderRadius: BorderRadius.circular(10),
+                              border: Border.all(
+                                  color: Colors.white.withOpacity(0.22)),
+                            ),
+                            child: const Row(mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(Icons.info_outline_rounded,
+                                      color: Colors.white, size: 18),
+                                  SizedBox(width: 7),
+                                  Text('Details',
+                                      style: TextStyle(
+                                          color: Colors.white,
+                                          fontWeight: FontWeight.w600,
+                                          fontSize: 14)),
+                                ]),
                           ),
                         ),
-                      );
-                    },
-                    icon: const Icon(Icons.play_arrow_rounded, color: Colors.black, size: 24),
-                    label: const Text(
-                      'Watch Now',
-                      style: TextStyle(
-                        color: Colors.black,
-                        fontWeight: FontWeight.bold,
-                        fontSize: 14,
                       ),
                     ),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                    ),
-                  ),
+                  ]),
                 ],
               ),
-            ],
+            ),
           ),
+        ),
+      ]),
+    );
+  }
+
+  Widget _heroBadge({required Widget child}) {
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(6),
+      child: BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+          decoration: BoxDecoration(
+            color: Colors.black.withOpacity(0.45),
+            borderRadius: BorderRadius.circular(6),
+            border: Border.all(color: Colors.white.withOpacity(0.12)),
+          ),
+          child: child,
         ),
       ),
     );
   }
 
-  Widget _buildHorizontalSection(
-    BuildContext context, {
-    required List<dynamic> items,
-    bool showFreeBadge = false,
-  }) {
-    if (items.isEmpty) {
-      return const SizedBox(
-        height: 200,
-        child: Center(
+  // ─────────────────────────────────────────────────────────────────────────
+  // STATUS BANNERS
+  // ─────────────────────────────────────────────────────────────────────────
+  Widget _buildOfflineStrip() {
+    return Container(
+      margin: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+      decoration: BoxDecoration(
+        color: Colors.red.shade900.withOpacity(0.7),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.redAccent.withOpacity(0.4)),
+      ),
+      child: const Row(children: [
+        Icon(Icons.wifi_off_rounded, color: Colors.redAccent, size: 16),
+        SizedBox(width: 10),
+        Expanded(
           child: Text(
-            'No content available in this section.',
-            style: TextStyle(color: AppTheme.textSecondary, fontSize: 13),
+            'You\'re offline — showing cached content.',
+            style: TextStyle(
+                color: Colors.white70, fontSize: 12),
           ),
+        ),
+      ]),
+    );
+  }
+
+  Widget _buildApiKeyWarning() {
+    return Container(
+      margin: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: const Color(0xFF1A1620),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+            color: Colors.amberAccent.withOpacity(0.25)),
+      ),
+      child: Row(children: [
+        Container(
+          width: 38, height: 38,
+          decoration: BoxDecoration(
+            color: Colors.amberAccent.withOpacity(0.12),
+            borderRadius: BorderRadius.circular(10),
+          ),
+          child: const Icon(Icons.key_rounded,
+              color: Colors.amberAccent, size: 18),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text('Demo Mode',
+                    style: TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 13)),
+                const SizedBox(height: 2),
+                Text('Add a TMDB API key in config.dart for live data.',
+                    style: TextStyle(
+                        color: Colors.white.withOpacity(0.5),
+                        fontSize: 11)),
+              ]),
+        ),
+      ]),
+    );
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // CONTINUE WATCHING
+  // ─────────────────────────────────────────────────────────────────────────
+  Widget _buildContinueWatching(
+      BuildContext context, DatabaseService db, TMDBService tmdb) {
+    final history = db.watchHistory;
+    if (history.isEmpty) return const SizedBox.shrink();
+
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      const SizedBox(height: 28),
+      _SectionHeader(
+        title: 'Continue Watching',
+        trailing: GestureDetector(
+          onTap: () {
+            db.clearDatabase();
+            ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('Watch history cleared.')));
+          },
+          child: const Text('Clear all',
+              style: TextStyle(
+                  color: _dimText, fontSize: 12)),
+        ),
+      ),
+      const SizedBox(height: 14),
+      SizedBox(
+        height: 140,
+        child: ListView.builder(
+          scrollDirection: Axis.horizontal,
+          physics: const BouncingScrollPhysics(),
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          itemCount: history.length,
+          itemBuilder: (ctx, i) {
+            final item = history[i];
+            final name = item['title'] ?? 'Untitled';
+            final url = _imageUrl(item['poster_path'], width: 300);
+            final progress = item['progress_seconds'] as int? ?? 0;
+            final duration = item['duration_seconds'] as int? ?? 0;
+            final pct = duration > 0 ? (progress / duration).clamp(0.0, 1.0) : 0.0;
+            final rem = duration > progress ? duration - progress : 0;
+            final remLabel = rem > 0
+                ? '${(rem / 60).floor()}m left'
+                : (pct > 0 ? 'Watched' : 'Start');
+            final epLabel = item['media_type'] == 'tv'
+                ? 'S${item['season'] ?? 1} E${item['episode'] ?? 1}'
+                : 'Movie';
+
+            return Dismissible(
+              key: Key('cw_${item['id']}_${item['season']}_${item['episode']}'),
+              direction: DismissDirection.up,
+              onDismissed: (_) => db.removeFromHistory(item['id']),
+              child: GestureDetector(
+                onTap: () => Navigator.push(ctx, MaterialPageRoute(
+                    builder: (_) => DetailsScreen(
+                        id: item['id'],
+                        mediaType: item['media_type'] ?? 'movie'))),
+                child: Container(
+                  width: 220,
+                  margin: const EdgeInsets.only(right: 12),
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(14),
+                    color: _card,
+                  ),
+                  clipBehavior: Clip.antiAlias,
+                  child: Stack(fit: StackFit.expand, children: [
+                    CachedNetworkImage(
+                      imageUrl: url,
+                      fit: BoxFit.cover,
+                      placeholder: (_, __) => Container(color: _card),
+                      errorWidget: (_, __, ___) => Container(color: _card),
+                      memCacheWidth: 220,
+                    ),
+
+                    const DecoratedBox(
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          colors: [Colors.transparent, Colors.black87],
+                          begin: Alignment.topCenter,
+                          end: Alignment.bottomCenter,
+                          stops: [0.35, 1.0],
+                        ),
+                      ),
+                    ),
+
+                    Center(child: Container(
+                      width: 42, height: 42,
+                      decoration: BoxDecoration(
+                        color: Colors.black.withOpacity(0.5),
+                        shape: BoxShape.circle,
+                        border: Border.all(
+                            color: Colors.white.withOpacity(0.6), width: 1.5),
+                      ),
+                      child: const Icon(Icons.play_arrow_rounded,
+                          color: Colors.white, size: 24),
+                    )),
+
+                    Positioned(
+                      bottom: pct > 0 ? 8 : 12,
+                      left: 10, right: 10,
+                      child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(name,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                    color: Colors.white,
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 12)),
+                            const SizedBox(height: 3),
+                            Row(
+                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                children: [
+                                  Text(epLabel,
+                                      style: TextStyle(
+                                          color: AppTheme.accent,
+                                          fontSize: 10,
+                                          fontWeight: FontWeight.bold)),
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(
+                                        horizontal: 6, vertical: 2),
+                                    decoration: BoxDecoration(
+                                      color: Colors.black54,
+                                      borderRadius: BorderRadius.circular(6),
+                                    ),
+                                    child: Text(remLabel,
+                                        style: const TextStyle(
+                                            color: Colors.white70, fontSize: 9)),
+                                  ),
+                                ]),
+                          ]),
+                    ),
+
+                    if (pct > 0)
+                      Positioned(
+                        bottom: 0, left: 0, right: 0,
+                        child: LinearProgressIndicator(
+                          value: pct,
+                          backgroundColor: Colors.white12,
+                          valueColor: AlwaysStoppedAnimation<Color>(
+                              AppTheme.accent),
+                          minHeight: 3,
+                        ),
+                      ),
+                  ]),
+                ),
+              ),
+            );
+          },
+        ),
+      ),
+    ]);
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // GENRE STRIP
+  // ─────────────────────────────────────────────────────────────────────────
+  Widget _buildGenreStrip(BuildContext context) {
+    final genres = [
+      {'id': '28',    'name': 'Action',    'icon': Icons.flash_on_rounded},
+      {'id': '35',    'name': 'Comedy',    'icon': Icons.sentiment_very_satisfied_rounded},
+      {'id': '27',    'name': 'Horror',    'icon': Icons.nights_stay_rounded},
+      {'id': '878',   'name': 'Sci-Fi',    'icon': Icons.rocket_launch_rounded},
+      {'id': '10749', 'name': 'Romance',   'icon': Icons.favorite_rounded},
+      {'id': '16',    'name': 'Animation', 'icon': Icons.animation_rounded},
+      {'id': '18',    'name': 'Drama',     'icon': Icons.theater_comedy_rounded},
+      {'id': '53',    'name': 'Thriller',  'icon': Icons.visibility_rounded},
+    ];
+
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      const SizedBox(height: 28),
+      const Padding(
+        padding: EdgeInsets.only(left: 20, bottom: 12),
+        child: Text('Genres',
+            style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.bold,
+                color: _dimText,
+                letterSpacing: 1.4)),
+      ),
+      SizedBox(
+        height: 44,
+        child: ListView.builder(
+          scrollDirection: Axis.horizontal,
+          physics: const BouncingScrollPhysics(),
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          itemCount: genres.length,
+          itemBuilder: (ctx, i) {
+            final g = genres[i];
+            return GestureDetector(
+              onTap: () => Navigator.push(ctx, MaterialPageRoute(
+                  builder: (_) => FilteredResultsScreen(
+                      title: g['name'] as String,
+                      genreId: g['id'] as String))),
+              child: Container(
+                margin: const EdgeInsets.only(right: 10),
+                padding: const EdgeInsets.symmetric(
+                    horizontal: 16, vertical: 10),
+                decoration: BoxDecoration(
+                  color: _card,
+                  borderRadius: BorderRadius.circular(22),
+                  border: Border.all(
+                      color: Colors.white.withOpacity(0.07)),
+                ),
+                child: Row(mainAxisSize: MainAxisSize.min, children: [
+                  Icon(g['icon'] as IconData,
+                      color: AppTheme.accent, size: 15),
+                  const SizedBox(width: 8),
+                  Text(g['name'] as String,
+                      style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 13,
+                          fontWeight: FontWeight.w500)),
+                ]),
+              ),
+            );
+          },
+        ),
+      ),
+    ]);
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // YEAR STRIP
+  // ─────────────────────────────────────────────────────────────────────────
+  Widget _buildYearStrip(BuildContext context) {
+    final years = ['2025', '2024', '2023', '2022', '2020s', '2010s', '2000s'];
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      const SizedBox(height: 20),
+      const Padding(
+        padding: EdgeInsets.only(left: 20, bottom: 10),
+        child: Text('By Year',
+            style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.bold,
+                color: _dimText,
+                letterSpacing: 1.4)),
+      ),
+      SizedBox(
+        height: 36,
+        child: ListView.builder(
+          scrollDirection: Axis.horizontal,
+          physics: const BouncingScrollPhysics(),
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          itemCount: years.length,
+          itemBuilder: (ctx, i) {
+            final y = years[i];
+            return GestureDetector(
+              onTap: () => Navigator.push(ctx, MaterialPageRoute(
+                  builder: (_) => FilteredResultsScreen(
+                      title: y, year: y))),
+              child: Container(
+                margin: const EdgeInsets.only(right: 8),
+                padding: const EdgeInsets.symmetric(
+                    horizontal: 14, vertical: 8),
+                decoration: BoxDecoration(
+                  color: Colors.white.withOpacity(0.05),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(
+                      color: Colors.white.withOpacity(0.07)),
+                ),
+                child: Text(y,
+                    style: const TextStyle(
+                        color: _dimText,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600)),
+              ),
+            );
+          },
+        ),
+      ),
+    ]);
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // SECTION JUMP PILLS
+  // ─────────────────────────────────────────────────────────────────────────
+  Widget _buildJumpPills(BuildContext context) {
+    final pills = [
+      {'label': 'Trending',  'key': _trendingKey,  'icon': Icons.trending_up_rounded,            'color': AppTheme.accent},
+      {'label': 'Movies',    'key': _moviesKey,    'icon': Icons.movie_rounded,                  'color': AppTheme.accent},
+      {'label': 'TV Shows',  'key': _seriesKey,    'icon': Icons.tv_rounded,                     'color': AppTheme.accent},
+      {'label': 'Upcoming',  'key': _upcomingKey,  'icon': Icons.event_note_rounded,             'color': const Color(0xFFF5C842)},
+      {'label': 'Netflix',   'key': _netflixKey,   'icon': Icons.play_circle_fill_rounded,       'color': Colors.redAccent},
+      {'label': 'Prime',     'key': _primeKey,     'icon': Icons.star_rounded,                   'color': Colors.lightBlueAccent},
+      {'label': 'Disney+',   'key': _disneyKey,    'icon': Icons.auto_awesome_rounded,           'color': Colors.blueAccent},
+      {'label': 'Action',    'key': _actionKey,    'icon': Icons.sports_martial_arts_rounded,    'color': AppTheme.accent},
+      {'label': 'Comedy',    'key': _comedyKey,    'icon': Icons.emoji_emotions_rounded,         'color': AppTheme.accent},
+      {'label': 'Sci-Fi',    'key': _scifiKey,     'icon': Icons.rocket_launch_rounded,          'color': AppTheme.accent},
+      {'label': 'Horror',    'key': _horrorKey,    'icon': Icons.dangerous_rounded,              'color': AppTheme.accent},
+      {'label': 'Bollywood', 'key': _bollywoodKey, 'icon': Icons.music_note_rounded,             'color': Colors.deepOrangeAccent},
+      {'label': 'Pakistani', 'key': _pakistaniKey, 'icon': Icons.language_rounded,               'color': Colors.greenAccent},
+      {'label': 'Free',      'key': _freeKey,      'icon': Icons.card_giftcard_rounded,          'color': Colors.greenAccent},
+    ];
+
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      const SizedBox(height: 24),
+      const Padding(
+        padding: EdgeInsets.only(left: 20, bottom: 10),
+        child: Text('Jump To',
+            style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.bold,
+                color: _dimText,
+                letterSpacing: 1.4)),
+      ),
+      SizedBox(
+        height: 38,
+        child: ListView.builder(
+          scrollDirection: Axis.horizontal,
+          physics: const BouncingScrollPhysics(),
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          itemCount: pills.length,
+          itemBuilder: (ctx, i) {
+            final p = pills[i];
+            final color = p['color'] as Color;
+            return GestureDetector(
+              onTap: () => _scrollToSection(p['key'] as GlobalKey),
+              child: Container(
+                margin: const EdgeInsets.only(right: 8),
+                padding: const EdgeInsets.symmetric(
+                    horizontal: 14, vertical: 8),
+                decoration: BoxDecoration(
+                  color: color.withOpacity(0.08),
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(
+                      color: color.withOpacity(0.22)),
+                ),
+                child: Row(mainAxisSize: MainAxisSize.min, children: [
+                  Icon(p['icon'] as IconData, color: color, size: 13),
+                  const SizedBox(width: 6),
+                  Text(p['label'] as String,
+                      style: TextStyle(
+                          color: color,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600)),
+                ]),
+              ),
+            );
+          },
+        ),
+      ),
+      const SizedBox(height: 8),
+    ]);
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // CONTENT ROWS
+  // ─────────────────────────────────────────────────────────────────────────
+  List<Widget> _contentRows(BuildContext context, TMDBService tmdb) {
+    Widget row(
+        String title,
+        List<dynamic> items,
+        GlobalKey key, {
+          Color? accentColor,
+          bool showFreeBadge = false,
+          bool isLoading = false,
+          String? platformLogoUrl,
+        }) {
+      return SliverToBoxAdapter(
+        child: RepaintBoundary(
+          child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const SizedBox(height: 32),
+                _SectionHeader(
+                  key: key,
+                  title: title,
+                  accentColor: accentColor,
+                  platformLogoUrl: platformLogoUrl,
+                  trailing: items.isNotEmpty
+                      ? GestureDetector(
+                    onTap: () => Navigator.push(context,
+                        MaterialPageRoute(
+                            builder: (_) => SeeAllScreen(
+                                categoryTitle: title,
+                                initialItems: items))),
+                    child: Row(children: [
+                      Text('See all',
+                          style: TextStyle(
+                              color: accentColor ?? AppTheme.accent,
+                              fontSize: 12,
+                              fontWeight: FontWeight.bold)),
+                      const SizedBox(width: 3),
+                      Icon(Icons.arrow_forward_ios_rounded,
+                          color: accentColor ?? AppTheme.accent,
+                          size: 10),
+                    ]),
+                  )
+                      : null,
+                ),
+                const SizedBox(height: 14),
+                isLoading || tmdb.isLoading
+                    ? ShimmerLoadingPresets.horizontalPostersSkeleton()
+                    : _buildPosterRow(context, items,
+                    showFreeBadge: showFreeBadge),
+              ]),
         ),
       );
     }
 
-    final isLive = Provider.of<TMDBService>(context, listen: false).hasApiKey;
+    return [
+      row('Trending Today',               tmdb.trending,      _trendingKey),
+      row('Blockbuster Movies',           tmdb.movies,        _moviesKey),
+      row('TV Shows & Series',            tmdb.series,        _seriesKey),
+      row('Bollywood Hits',               tmdb.bollywood,     _bollywoodKey,
+          accentColor: Colors.deepOrangeAccent),
+      row('Pakistani Dramas & Films',     tmdb.pakistani,     _pakistaniKey,
+          accentColor: Colors.greenAccent),
+      SliverToBoxAdapter(
+          child: _buildUpcomingSection(context, tmdb)),
+      row('Streaming on Netflix',         tmdb.netflix,       _netflixKey,
+          accentColor: Colors.redAccent,
+          platformLogoUrl:
+          'https://upload.wikimedia.org/wikipedia/commons/f/ff/Netflix-new-icon.png'),
+      row('Streaming on Prime Video',     tmdb.prime,         _primeKey,
+          accentColor: Colors.lightBlueAccent,
+          platformLogoUrl:
+          'https://upload.wikimedia.org/wikipedia/commons/d/de/Amazon_icon.png'),
+      row('Streaming on Disney+',         tmdb.disney,        _disneyKey,
+          accentColor: Colors.blueAccent,
+          platformLogoUrl:
+          'https://upload.wikimedia.org/wikipedia/commons/3/3e/Disney%2B_logo.png'),
+      row('Action & Thrillers',           tmdb.actionMovies,  _actionKey),
+      row('Comedies',                     tmdb.comedyMovies,  _comedyKey),
+      row('Sci-Fi & Cyberpunk',           tmdb.scifiMovies,   _scifiKey),
+      row('Horror & Mystery',             tmdb.horrorMovies,  _horrorKey),
+      SliverToBoxAdapter(
+        child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const SizedBox(height: 32),
+              _SectionHeader(
+                key: _freeKey,
+                title: 'Free to Watch',
+                trailing: Row(children: [
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 7, vertical: 3),
+                    decoration: BoxDecoration(
+                      color: Colors.greenAccent.withOpacity(0.12),
+                      borderRadius: BorderRadius.circular(6),
+                      border: Border.all(
+                          color: Colors.greenAccent.withOpacity(0.3)),
+                    ),
+                    child: const Text('NO COST',
+                        style: TextStyle(
+                            color: Colors.greenAccent,
+                            fontSize: 9,
+                            fontWeight: FontWeight.bold,
+                            letterSpacing: 0.8)),
+                  ),
+                ]),
+              ),
+              const SizedBox(height: 14),
+              _buildPosterRow(context,
+                  tmdb.hasApiKey ? tmdb.trending : tmdb.trending.take(3).toList(),
+                  showFreeBadge: true),
+            ]),
+      ),
+    ];
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // UPCOMING SECTION
+  // ─────────────────────────────────────────────────────────────────────────
+  Widget _buildUpcomingSection(BuildContext context, TMDBService tmdb) {
+    final list = tmdb.upcoming;
+    if (list.isEmpty) return const SizedBox.shrink();
+
+    return Column(
+        key: _upcomingKey,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const SizedBox(height: 32),
+          _SectionHeader(
+            title: 'Upcoming Releases',
+            accentColor: _gold,
+            trailing: GestureDetector(
+              onTap: () => Navigator.push(context, MaterialPageRoute(
+                  builder: (_) => const UpcomingReleasesScreen())),
+              child: const Row(children: [
+                Text('See all',
+                    style: TextStyle(
+                        color: _gold,
+                        fontSize: 12,
+                        fontWeight: FontWeight.bold)),
+                SizedBox(width: 3),
+                Icon(Icons.arrow_forward_ios_rounded,
+                    color: _gold, size: 10),
+              ]),
+            ),
+          ),
+          const SizedBox(height: 14),
+          SizedBox(
+            height: 230,
+            child: ListView.builder(
+              scrollDirection: Axis.horizontal,
+              physics: const BouncingScrollPhysics(),
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              itemCount: list.length,
+              itemBuilder: (ctx, i) {
+                final item = list[i];
+                final name = item['title'] ?? 'Upcoming';
+                final url = _imageUrl(item['poster_path'], width: 300);
+                final date = item['release_date'] ?? 'Coming Soon';
+
+                return GestureDetector(
+                  onTap: () => _pushDetails(ctx, item, mediaType: 'movie'),
+                  child: Container(
+                    width: 120,
+                    margin: const EdgeInsets.only(right: 12),
+                    child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Expanded(
+                            child: Stack(fit: StackFit.expand, children: [
+                              ClipRRect(
+                                borderRadius: BorderRadius.circular(12),
+                                child: CachedNetworkImage(
+                                  imageUrl: url,
+                                  fit: BoxFit.cover,
+                                  placeholder: (_, __) => Container(color: _card),
+                                  errorWidget: (_, __, ___) => Container(color: _card),
+                                  memCacheWidth: 120,
+                                ),
+                              ),
+                              Positioned(
+                                top: 8, right: 8,
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 6, vertical: 3),
+                                  decoration: BoxDecoration(
+                                    color: _gold.withOpacity(0.9),
+                                    borderRadius: BorderRadius.circular(5),
+                                  ),
+                                  child: const Text('SOON',
+                                      style: TextStyle(
+                                          color: Colors.black,
+                                          fontSize: 8,
+                                          fontWeight: FontWeight.bold,
+                                          letterSpacing: 0.5)),
+                                ),
+                              ),
+                            ]),
+                          ),
+                          const SizedBox(height: 7),
+                          Text(name,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.bold)),
+                          const SizedBox(height: 2),
+                          Text(date,
+                              style: const TextStyle(
+                                  color: _gold,
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.w600)),
+                        ]),
+                  ),
+                );
+              },
+            ),
+          ),
+        ]);
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // POSTER ROW
+  // ─────────────────────────────────────────────────────────────────────────
+  Widget _buildPosterRow(BuildContext context, List<dynamic> items,
+      {bool showFreeBadge = false}) {
+    if (items.isEmpty) {
+      return const SizedBox(
+        height: 180,
+        child: Center(
+          child: Text('Nothing here yet.',
+              style: TextStyle(color: _dimText, fontSize: 13)),
+        ),
+      );
+    }
 
     return SizedBox(
-      height: 230,
+      height: 210,
       child: ListView.builder(
         scrollDirection: Axis.horizontal,
-        padding: const EdgeInsets.symmetric(horizontal: 12),
+        physics: const BouncingScrollPhysics(),
+        padding: const EdgeInsets.symmetric(horizontal: 16),
         itemCount: items.length,
-        itemBuilder: (context, index) {
-          final item = items[index];
+        itemBuilder: (ctx, i) {
+          final item = items[i];
           final name = item['title'] ?? item['name'] ?? 'Untitled';
-          final voteAverage = (item['vote_average'] as num?)?.toDouble() ?? 0.0;
-          final rating = voteAverage.toStringAsFixed(1);
-
-          final posterPath = item['poster_path'];
-          final imageUrl = isLive && posterPath != null
-              ? (posterPath.toString().startsWith('http') ? posterPath : '${TMDBService.imageBaseUrl}$posterPath')
-              : (posterPath ?? 'https://images.unsplash.com/photo-1489599849927-2ee91cede3ba?w=300');
+          final rating = (item['vote_average'] as num?)?.toDouble() ?? 0.0;
+          final url = _imageUrl(item['poster_path'], width: 300);
 
           return GestureDetector(
-            onTap: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (context) => DetailsScreen(
-                    id: item['id'],
-                    mediaType: item['media_type'] ?? (item['title'] != null ? 'movie' : 'tv'),
-                    posterUrl: imageUrl,
-                  ),
-                ),
-              );
-            },
+            onTap: () => _pushDetails(ctx, item, posterUrl: url),
             child: Container(
-              width: 130,
-              margin: const EdgeInsets.symmetric(horizontal: 8),
+              width: 120,
+              margin: const EdgeInsets.only(right: 12),
               child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Expanded(
-                    child: Hero(
-                      tag: 'poster_${item['id']}',
-                      child: ClipRRect(
-                        borderRadius: BorderRadius.circular(12),
-                      child: Stack(
-                        fit: StackFit.expand,
-                        children: [
-                          Image.network(
-                            imageUrl,
-                            fit: BoxFit.cover,
-                            loadingBuilder: (context, child, loadingProgress) {
-                              if (loadingProgress == null) return child;
-                              return const ImageShimmerPlaceholder(borderRadius: 12);
-                            },
-                            errorBuilder: (context, error, stackTrace) {
-                              return Container(
-                                color: AppTheme.surface,
-                                child: const Icon(Icons.movie, color: Colors.white24, size: 36),
-                              );
-                            },
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(
+                      child: Hero(
+                        tag: 'poster_${item['id']}',
+                        child: Container(
+                          decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(12),
+                            boxShadow: [
+                              BoxShadow(
+                                color: Colors.black.withOpacity(0.4),
+                                blurRadius: 10,
+                                offset: const Offset(0, 4),
+                              ),
+                            ],
                           ),
-                          if (showFreeBadge)
-                            Positioned(
-                              top: 8,
-                              left: 8,
-                              child: Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                                decoration: BoxDecoration(
-                                  color: Colors.green.shade700,
-                                  borderRadius: BorderRadius.circular(4),
-                                  boxShadow: const [BoxShadow(color: Colors.black38, blurRadius: 4)],
-                                ),
-                                child: const Text(
-                                  'FREE',
-                                  style: TextStyle(
-                                    color: Colors.white,
-                                    fontSize: 9,
-                                    fontWeight: FontWeight.bold,
+                          child: ClipRRect(
+                            borderRadius: BorderRadius.circular(12),
+                            child: Stack(fit: StackFit.expand, children: [
+                              CachedNetworkImage(
+                                imageUrl: url,
+                                fit: BoxFit.cover,
+                                placeholder: (_, __) => const ImageShimmerPlaceholder(borderRadius: 12),
+                                errorWidget: (_, __, ___) => Container(
+                                    color: _card,
+                                    child: const Icon(Icons.movie_rounded,
+                                        color: Colors.white12, size: 36)),
+                                memCacheWidth: 120,
+                              ),
+
+                              if (showFreeBadge)
+                                Positioned(
+                                  top: 7, left: 7,
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(
+                                        horizontal: 6, vertical: 2),
+                                    decoration: BoxDecoration(
+                                      color: Colors.green.shade700,
+                                      borderRadius: BorderRadius.circular(4),
+                                    ),
+                                    child: const Text('FREE',
+                                        style: TextStyle(
+                                            color: Colors.white,
+                                            fontSize: 8,
+                                            fontWeight: FontWeight.bold)),
                                   ),
                                 ),
-                              ),
-                            ),
-                          Positioned(
-                            bottom: 8,
-                            right: 8,
-                            child: Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                              decoration: BoxDecoration(
-                                color: Colors.black87,
-                                borderRadius: BorderRadius.circular(6),
-                              ),
-                              child: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  const Icon(Icons.star, color: AppTheme.secondaryAccent, size: 10),
-                                  const SizedBox(width: 2),
-                                  Text(
-                                    rating,
-                                    style: const TextStyle(
-                                      color: Colors.white,
-                                      fontSize: 10,
-                                      fontWeight: FontWeight.bold,
+
+                              Positioned(
+                                bottom: 7, right: 7,
+                                child: ClipRRect(
+                                  borderRadius: BorderRadius.circular(6),
+                                  child: BackdropFilter(
+                                    filter: ImageFilter.blur(
+                                        sigmaX: 8, sigmaY: 8),
+                                    child: Container(
+                                      padding: const EdgeInsets.symmetric(
+                                          horizontal: 7, vertical: 3),
+                                      decoration: BoxDecoration(
+                                        color: Colors.black.withOpacity(0.55),
+                                        borderRadius: BorderRadius.circular(6),
+                                      ),
+                                      child: Row(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            const Icon(Icons.star_rounded,
+                                                color: _gold, size: 10),
+                                            const SizedBox(width: 3),
+                                            Text(rating.toStringAsFixed(1),
+                                                style: const TextStyle(
+                                                    color: Colors.white,
+                                                    fontSize: 10,
+                                                    fontWeight: FontWeight.bold)),
+                                          ]),
                                     ),
                                   ),
-                                ],
+                                ),
                               ),
-                            ),
+                            ]),
                           ),
-                        ],
+                        ),
                       ),
                     ),
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    name,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w500,
-                      color: AppTheme.textPrimary,
-                    ),
-                  ),
-                ],
-              ),
+                    const SizedBox(height: 8),
+                    Text(name,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w500,
+                            color: Colors.white,
+                            height: 1.35)),
+                  ]),
             ),
           );
         },
@@ -1244,13 +1373,18 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  Widget _buildDrawer(BuildContext context) {
-    final dbService = Provider.of<DatabaseService>(context);
-    final isPremium = dbService.isPremium;
+  // ─────────────────────────────────────────────────────────────────────────
+  // DRAWER (unchanged - already excellent)
+  // ─────────────────────────────────────────────────────────────────────────
+  Widget _buildDrawer(BuildContext context, DatabaseService db) {
+    final isPremium = db.isPremium;
+    final isLoggedIn = db.isLoggedIn;
+    final username = isLoggedIn ? db.username : db.currentProfile;
+    final sub = isLoggedIn ? db.email : (isPremium ? 'Premium Active' : 'Free Account');
 
-    Color themeColor = Colors.purpleAccent;
-    if (dbService.currentProfile == 'Family') themeColor = Colors.blueAccent;
-    if (dbService.currentProfile == 'Kids') themeColor = Colors.greenAccent;
+    Color profileColor = AppTheme.accent;
+    if (db.currentProfile == 'Family') profileColor = Colors.blueAccent;
+    if (db.currentProfile == 'Kids')   profileColor = Colors.greenAccent;
 
     void navTo(Widget screen) {
       Navigator.pop(context);
@@ -1258,356 +1392,328 @@ class _HomeScreenState extends State<HomeScreen> {
     }
 
     return Drawer(
-      child: Container(
-        color: AppTheme.background,
-        child: SafeArea(
-          child: Column(
-            children: [
-              // ── Profile Header ──────────────────────────────
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.fromLTRB(20, 24, 20, 20),
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    colors: [themeColor.withAlpha(200), themeColor.withAlpha(60)],
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                  ),
-                ),
-                child: Row(
-                  children: [
-                    CircleAvatar(
-                      radius: 26,
-                      backgroundColor: Colors.white.withAlpha(220),
-                      child: Text(
-                        dbService.isLoggedIn
-                            ? dbService.username.substring(0, 1).toUpperCase()
-                            : dbService.currentProfile.substring(0, 1),
-                        style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: themeColor),
-                      ),
-                    ),
-                    const SizedBox(width: 14),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            dbService.isLoggedIn ? dbService.username : dbService.currentProfile,
-                            style: const TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.bold),
-                          ),
-                          const SizedBox(height: 2),
-                          Text(
-                            dbService.isLoggedIn
-                                ? dbService.email
-                                : (isPremium ? 'Premium Active' : 'Free Account'),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(color: Colors.white.withAlpha(170), fontSize: 11),
-                          ),
-                        ],
-                      ),
-                    ),
-                    if (isPremium)
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                        decoration: BoxDecoration(
-                          color: Colors.tealAccent.withAlpha(40),
-                          borderRadius: BorderRadius.circular(20),
-                          border: Border.all(color: Colors.tealAccent.withAlpha(80)),
-                        ),
-                        child: const Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(Icons.verified_rounded, color: Colors.tealAccent, size: 12),
-                            SizedBox(width: 4),
-                            Text('PRO', style: TextStyle(color: Colors.tealAccent, fontSize: 10, fontWeight: FontWeight.bold)),
-                          ],
-                        ),
-                      ),
-                  ],
+      backgroundColor: _surface,
+      child: SafeArea(
+        child: Column(children: [
+          Container(
+            width: double.infinity,
+            margin: const EdgeInsets.all(16),
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: [
+                  profileColor.withOpacity(0.22),
+                  profileColor.withOpacity(0.06),
+                ],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+              ),
+              borderRadius: BorderRadius.circular(18),
+              border: Border.all(
+                  color: profileColor.withOpacity(0.25)),
+            ),
+            child: Row(children: [
+              CircleAvatar(
+                radius: 24,
+                backgroundColor: profileColor.withOpacity(0.25),
+                child: Text(
+                  username.substring(0, 1).toUpperCase(),
+                  style: TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                      color: profileColor),
                 ),
               ),
-
-              // ── Scrollable Navigation ───────────────────────
+              const SizedBox(width: 14),
               Expanded(
-                child: SingleChildScrollView(
-                  child: Column(
+                child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const SizedBox(height: 8),
+                      Text(username,
+                          style: const TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.bold,
+                              fontSize: 15)),
+                      const SizedBox(height: 2),
+                      Text(sub,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                              color: _dimText, fontSize: 11)),
+                    ]),
+              ),
+              if (isPremium)
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 8, vertical: 3),
+                  decoration: BoxDecoration(
+                    color: Colors.tealAccent.withOpacity(0.12),
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(
+                        color: Colors.tealAccent.withOpacity(0.3)),
+                  ),
+                  child: const Row(mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.verified_rounded,
+                            color: Colors.tealAccent, size: 11),
+                        SizedBox(width: 4),
+                        Text('PRO',
+                            style: TextStyle(
+                                color: Colors.tealAccent,
+                                fontSize: 10,
+                                fontWeight: FontWeight.bold)),
+                      ]),
+                ),
+            ]),
+          ),
 
-                      _drawerSectionLabel('Discover'),
-
+          Expanded(
+            child: SingleChildScrollView(
+              child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    _drawerLabel('Discover'),
+                    _drawerItem(
+                      icon: Icons.calendar_month_rounded,
+                      label: 'Upcoming Releases',
+                      color: Colors.amberAccent,
+                      onTap: () => navTo(const UpcomingReleasesScreen()),
+                    ),
+                    _drawerItem(
+                      icon: Icons.history_rounded,
+                      label: 'Watch History',
+                      color: Colors.lightBlueAccent,
+                      onTap: () => navTo(const WatchHistoryScreen()),
+                    ),
+                    _drawerItem(
+                      icon: Icons.download_for_offline_rounded,
+                      label: 'Offline Downloads',
+                      color: Colors.greenAccent,
+                      onTap: () => navTo(const DownloadsScreen()),
+                    ),
+                    const _DrawerDivider(),
+                    _drawerLabel('Account'),
+                    _drawerItem(
+                      icon: Icons.settings_rounded,
+                      label: 'Settings',
+                      color: _dimText,
+                      onTap: () => navTo(const SettingsScreen()),
+                    ),
+                    if (!isLoggedIn)
                       _drawerItem(
-                        icon: Icons.calendar_month_rounded,
-                        label: 'Upcoming Releases',
-                        iconColor: Colors.amberAccent,
-                        onTap: () => navTo(const UpcomingReleasesScreen()),
+                        icon: Icons.login_rounded,
+                        label: 'Sign In / Sign Up',
+                        color: AppTheme.accent,
+                        onTap: () => navTo(
+                            const LoginScreen(showSkipButton: false)),
                       ),
+                    const _DrawerDivider(),
 
-                      _drawerItem(
-                        icon: Icons.history_rounded,
-                        label: 'Watch History',
-                        iconColor: Colors.lightBlueAccent,
-                        onTap: () => navTo(const WatchHistoryScreen()),
-                      ),
-
-                      _drawerItem(
-                        icon: Icons.download_for_offline_rounded,
-                        label: 'Offline Downloads',
-                        iconColor: Colors.greenAccent,
-                        onTap: () => navTo(const DownloadsScreen()),
-                      ),
-
-                      const Padding(
-                        padding: EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-                        child: Divider(color: Colors.white12, height: 1),
-                      ),
-
-                      _drawerSectionLabel('Account'),
-
-                      _drawerItem(
-                        icon: Icons.settings_rounded,
-                        label: 'Settings',
-                        iconColor: Colors.white60,
-                        onTap: () => navTo(const SettingsScreen()),
-                      ),
-
-                      if (!dbService.isLoggedIn)
-                        _drawerItem(
-                          icon: Icons.login_rounded,
-                          label: 'Sign In / Sign Up',
-                          iconColor: AppTheme.accent,
-                          onTap: () => navTo(const LoginScreen(showSkipButton: false)),
-                        ),
-
-                      const Padding(
-                        padding: EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-                        child: Divider(color: Colors.white12, height: 1),
-                      ),
-
-                      // ── Premium Card ──────────────────────────
-                      Padding(
-                        padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
-                        child: GestureDetector(
-                          onTap: () => navTo(const SettingsScreen()),
-                          child: AnimatedContainer(
-                            duration: const Duration(milliseconds: 200),
-                            padding: const EdgeInsets.all(14),
-                            decoration: BoxDecoration(
-                              gradient: LinearGradient(
-                                colors: isPremium
-                                    ? [Colors.tealAccent.withAlpha(30), Colors.tealAccent.withAlpha(10)]
-                                    : [AppTheme.secondaryAccent.withAlpha(40), AppTheme.secondaryAccent.withAlpha(15)],
-                              ),
-                              borderRadius: BorderRadius.circular(14),
-                              border: Border.all(
-                                color: isPremium
-                                    ? Colors.tealAccent.withAlpha(60)
-                                    : AppTheme.secondaryAccent.withAlpha(70),
-                              ),
-                            ),
-                            child: Row(
-                              children: [
-                                Icon(
-                                  isPremium ? Icons.verified_rounded : Icons.workspace_premium_rounded,
-                                  color: isPremium ? Colors.tealAccent : AppTheme.secondaryAccent,
-                                  size: 22,
-                                ),
-                                const SizedBox(width: 12),
-                                Expanded(
-                                  child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
-                                    children: [
-                                      Text(
-                                        isPremium ? 'Premium Pro Active' : 'Upgrade to Premium',
-                                        style: TextStyle(
-                                          color: isPremium ? Colors.tealAccent : Colors.white,
-                                          fontWeight: FontWeight.bold,
-                                          fontSize: 13,
-                                        ),
-                                      ),
-                                      Text(
-                                        isPremium ? 'Lifetime · Ad-free' : 'Remove ads · \$1.99 lifetime',
-                                        style: const TextStyle(color: AppTheme.textSecondary, fontSize: 11),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                                if (!isPremium)
-                                  const Icon(Icons.arrow_forward_ios_rounded, color: AppTheme.secondaryAccent, size: 13),
-                              ],
-                            ),
+                    GestureDetector(
+                      onTap: () => navTo(const SettingsScreen()),
+                      child: Container(
+                        margin: const EdgeInsets.fromLTRB(16, 4, 16, 8),
+                        padding: const EdgeInsets.all(14),
+                        decoration: BoxDecoration(
+                          gradient: LinearGradient(
+                            colors: isPremium
+                                ? [Colors.tealAccent.withOpacity(0.12),
+                              Colors.tealAccent.withOpacity(0.04)]
+                                : [AppTheme.accent.withOpacity(0.15),
+                              AppTheme.accent.withOpacity(0.05)],
+                          ),
+                          borderRadius: BorderRadius.circular(16),
+                          border: Border.all(
+                            color: isPremium
+                                ? Colors.tealAccent.withOpacity(0.25)
+                                : AppTheme.accent.withOpacity(0.3),
                           ),
                         ),
+                        child: Row(children: [
+                          Icon(
+                            isPremium
+                                ? Icons.verified_rounded
+                                : Icons.workspace_premium_rounded,
+                            color: isPremium
+                                ? Colors.tealAccent
+                                : AppTheme.accent,
+                            size: 22,
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    isPremium
+                                        ? 'Premium Pro Active'
+                                        : 'Upgrade to Premium',
+                                    style: TextStyle(
+                                      color: isPremium
+                                          ? Colors.tealAccent
+                                          : Colors.white,
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 13,
+                                    ),
+                                  ),
+                                  Text(
+                                    isPremium
+                                        ? 'Lifetime · Ad-free'
+                                        : 'Remove ads · \$1.99 lifetime',
+                                    style: const TextStyle(
+                                        color: _dimText, fontSize: 11),
+                                  ),
+                                ]),
+                          ),
+                          if (!isPremium)
+                            Icon(Icons.arrow_forward_ios_rounded,
+                                color: AppTheme.accent, size: 12),
+                        ]),
                       ),
-                    ],
-                  ),
-                ),
-              ),
-
-              // ── Footer ─────────────────────────────────────
-              const Padding(
-                padding: EdgeInsets.fromLTRB(20, 10, 20, 12),
-                child: Row(
-                  children: [
-                    Icon(Icons.movie_filter_rounded, color: Colors.white12, size: 13),
-                    SizedBox(width: 6),
-                    Text(
-                      'StreamSync  v1.2.0',
-                      style: TextStyle(color: Colors.white12, fontSize: 11),
                     ),
-                  ],
-                ),
-              ),
-            ],
+                  ]),
+            ),
           ),
-        ),
+
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 8, 20, 12),
+            child: Row(children: [
+              const Icon(Icons.movie_filter_rounded,
+                  color: Colors.white12, size: 12),
+              const SizedBox(width: 6),
+              Text('CineSync  v1.2.0',
+                  style: TextStyle(
+                      color: Colors.white.withOpacity(0.1),
+                      fontSize: 11)),
+            ]),
+          ),
+        ]),
       ),
     );
   }
 
-  Widget _drawerSectionLabel(String label) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 10, 20, 4),
-      child: Text(
-        label.toUpperCase(),
+  Widget _drawerLabel(String text) => Padding(
+    padding: const EdgeInsets.fromLTRB(20, 14, 20, 5),
+    child: Text(text.toUpperCase(),
         style: const TextStyle(
-          color: Colors.white30,
-          fontSize: 10,
-          fontWeight: FontWeight.bold,
-          letterSpacing: 1.4,
-        ),
-      ),
-    );
-  }
-
-  Widget _buildGenresRow(BuildContext context) {
-    final genres = [
-      {'id': '28', 'name': 'Action', 'icon': Icons.flash_on},
-      {'id': '35', 'name': 'Comedy', 'icon': Icons.sentiment_very_satisfied},
-      {'id': '27', 'name': 'Horror', 'icon': Icons.nights_stay},
-      {'id': '878', 'name': 'Sci-Fi', 'icon': Icons.rocket_launch},
-      {'id': '10749', 'name': 'Romance', 'icon': Icons.favorite},
-      {'id': '16', 'name': 'Animation', 'icon': Icons.animation},
-    ];
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const Padding(
-          padding: EdgeInsets.symmetric(horizontal: 20, vertical: 8),
-          child: Text('Browse by Genre', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: Colors.white70)),
-        ),
-        SizedBox(
-          height: 40,
-          child: ListView.builder(
-            scrollDirection: Axis.horizontal,
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            itemCount: genres.length,
-            itemBuilder: (context, index) {
-              final g = genres[index];
-              return GestureDetector(
-                onTap: () {
-                  Navigator.push(context, MaterialPageRoute(
-                    builder: (_) => FilteredResultsScreen(title: g['name'] as String, genreId: g['id'] as String),
-                  ));
-                },
-                child: Container(
-                  margin: const EdgeInsets.only(right: 12),
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                  decoration: BoxDecoration(
-                    color: AppTheme.surface,
-                    borderRadius: BorderRadius.circular(20),
-                    border: Border.all(color: Colors.white10),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(g['icon'] as IconData, color: AppTheme.accent, size: 16),
-                      const SizedBox(width: 8),
-                      Text(g['name'] as String, style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w500)),
-                    ],
-                  ),
-                ),
-              );
-            },
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildYearsRow(BuildContext context) {
-    final years = ['2024', '2023', '2022', '2020s', '2010s', '2000s'];
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const Padding(
-          padding: EdgeInsets.symmetric(horizontal: 20, vertical: 8),
-          child: Text('Release Year', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: Colors.white70)),
-        ),
-        SizedBox(
-          height: 36,
-          child: ListView.builder(
-            scrollDirection: Axis.horizontal,
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            itemCount: years.length,
-            itemBuilder: (context, index) {
-              final y = years[index];
-              return GestureDetector(
-                onTap: () {
-                  Navigator.push(context, MaterialPageRoute(
-                    builder: (_) => FilteredResultsScreen(title: y, year: y),
-                  ));
-                },
-                child: Container(
-                  margin: const EdgeInsets.only(right: 10),
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                  decoration: BoxDecoration(
-                    color: Colors.white.withOpacity(0.05),
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: Center(
-                    child: Text(y, style: const TextStyle(color: Colors.white70, fontSize: 13, fontWeight: FontWeight.w500)),
-                  ),
-                ),
-              );
-            },
-          ),
-        ),
-      ],
-    );
-  }
+            color: _dimText,
+            fontSize: 10,
+            fontWeight: FontWeight.bold,
+            letterSpacing: 1.5)),
+  );
 
   Widget _drawerItem({
     required IconData icon,
     required String label,
-    Color iconColor = Colors.white70,
+    required Color color,
     required VoidCallback onTap,
   }) {
     return InkWell(
       onTap: onTap,
+      borderRadius: BorderRadius.circular(12),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 1),
         child: ListTile(
           dense: true,
+          shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12)),
           leading: Container(
-            width: 34,
-            height: 34,
+            width: 34, height: 34,
             decoration: BoxDecoration(
-              color: iconColor.withAlpha(20),
+              color: color.withOpacity(0.1),
               borderRadius: BorderRadius.circular(10),
             ),
-            child: Icon(icon, color: iconColor, size: 17),
+            child: Icon(icon, color: color, size: 17),
           ),
-          title: Text(label, style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w500)),
-          trailing: const Icon(Icons.chevron_right_rounded, color: Colors.white24, size: 15),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          title: Text(label,
+              style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 14,
+                  fontWeight: FontWeight.w500)),
+          trailing: Icon(Icons.chevron_right_rounded,
+              color: Colors.white.withOpacity(0.15), size: 16),
         ),
       ),
     );
   }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // HELPERS
+  // ─────────────────────────────────────────────────────────────────────────
+  void _pushDetails(BuildContext context, dynamic item,
+      {String? mediaType, String? posterUrl}) {
+    Navigator.push(context, MaterialPageRoute(
+        builder: (_) => DetailsScreen(
+          id: item['id'],
+          mediaType: mediaType ?? item['media_type'] ?? 'movie',
+          posterUrl: posterUrl,
+        )));
+  }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// SHARED WIDGETS
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _SectionHeader extends StatelessWidget {
+  const _SectionHeader({
+    super.key,
+    required this.title,
+    this.trailing,
+    this.accentColor,
+    this.platformLogoUrl,
+  });
+
+  final String   title;
+  final Widget?  trailing;
+  final Color?   accentColor;
+  final String?  platformLogoUrl;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 20),
+      child: Row(children: [
+        if (platformLogoUrl != null) ...[
+          ClipRRect(
+            borderRadius: BorderRadius.circular(4),
+            child: CachedNetworkImage(
+              imageUrl: platformLogoUrl!,
+              width: 18, height: 18,
+              fit: BoxFit.contain,
+              placeholder: (_, __) => const SizedBox.shrink(),
+              errorWidget: (_, __, ___) => const SizedBox.shrink(),
+            ),
+          ),
+          const SizedBox(width: 8),
+        ],
+        Container(
+          width: 3, height: 17,
+          decoration: BoxDecoration(
+            color: accentColor ?? AppTheme.accent,
+            borderRadius: BorderRadius.circular(2),
+          ),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Text(title,
+              style: const TextStyle(
+                  fontSize: 17,
+                  fontWeight: FontWeight.w800,
+                  color: Colors.white,
+                  letterSpacing: -0.2)),
+        ),
+        if (trailing != null) trailing!,
+      ]),
+    );
+  }
+}
+
+class _DrawerDivider extends StatelessWidget {
+  const _DrawerDivider();
+  @override
+  Widget build(BuildContext context) => const Padding(
+    padding: EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+    child: Divider(color: Colors.white10, height: 1),
+  );
+}

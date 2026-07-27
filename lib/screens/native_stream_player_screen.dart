@@ -34,191 +34,173 @@ class NativeStreamPlayerScreen extends StatefulWidget {
   });
 
   @override
-  State<NativeStreamPlayerScreen> createState() => _NativeStreamPlayerScreenState();
+  State<NativeStreamPlayerScreen> createState() =>
+      _NativeStreamPlayerScreenState();
 }
 
 class _NativeStreamPlayerScreenState extends State<NativeStreamPlayerScreen>
     with WidgetsBindingObserver, TickerProviderStateMixin {
 
-  // ── State ────────────────────────────────────────────────────────────────
-  int _currentSeason = 1;
+  // ── Core state ─────────────────────────────────────────────────────────────
+  int _currentSeason  = 1;
   int _currentEpisode = 1;
-  int _episodeCount = 10;
+  int _episodeCount   = 10;
 
-  bool _isResolving = true;       // Looking up stream URL
-  String _resolvingStatus = 'Finding best stream...';
-  bool _isNativeMode = false;     // true = media_kit, false = WebView
-  bool _isUnavailable = false;
+  bool    _isResolving     = true;
+  String  _resolvingStatus = 'Looking for stream…';
+  bool    _isNativeMode    = false;
+  bool    _isUnavailable   = false;
   String? _streamUrl;
   String? _streamSource;
 
   // Controls
-  bool _isControlsVisible = true;
-  bool _isLocked = false;
+  bool _isControlsVisible     = true;
+  bool _isLocked              = false;
   bool _isEpisodePanelVisible = false;
 
   // Timers
   Timer? _controlsTimer;
-  Timer? _unavailableTimer;
   Timer? _loadingTimeout;
+  Timer? _resizeDebounce;
+  Timer? _progressTimer;
+  Timer? _videoDetectionTimer; // NEW: Timer for detecting video playback
 
-  // Gesture
-  double _brightness = 0.5;
-  double _volume = 1.0;
-  bool _showBrightnessOverlay = false;
-  bool _showVolumeOverlay = false;
+  // Gesture overlays
+  double _brightness            = 0.5;
+  double _volume                = 1.0;
+  bool   _showBrightnessOverlay = false;
+  bool   _showVolumeOverlay     = false;
 
   // Animations
   late AnimationController _controlsAnimController;
-  late Animation<double> _controlsFade;
+  late Animation<double>   _controlsFade;
   late AnimationController _episodePanelController;
-  late Animation<Offset> _episodePanelSlide;
+  late Animation<Offset>   _episodePanelSlide;
 
-  // Media Kit (native player)
-  late final Player _player = Player();
+  // Native player
+  late final Player          _player          = Player();
   late final VideoController _videoController = VideoController(_player);
 
-  // WebView (fallback)
+  // WebView
   InAppWebViewController? _webController;
-  bool _webLoading = false;
-  int _webMirrorIndex = 0;
-  bool _autoSwitchTriggered = false; // Guard against repeated auto-switches
-  final Map<int, bool?> _mirrorHealth = {}; // null=unknown, true=good, false=bad
+  bool _webLoading          = false;
+  int  _webMirrorIndex      = 0;
+  bool _autoSwitchTriggered = false;
+  bool _videoPlayingDetected = false; // NEW: Flag to prevent auto-switching
+  final Map<int, bool?> _mirrorHealth = {};
+  Key  _webViewKey = UniqueKey();
 
-  // Progress tracking
-  Timer? _progressTimer;
+  List<Map<String, String>> _mirrors = [];
 
-  // Web mirrors for fallback
-  final List<Map<String, String>> _mirrors = [
-    {'name': 'VidLink', 'id': 'vidlink'},
-    {'name': 'VidSrc', 'id': 'vidsrc'},
-    {'name': 'EmbedSU', 'id': 'embedsu'},
-    {'name': 'VidSrc.cc', 'id': 'vidsrccc'},
-    {'name': 'VidSrc.me', 'id': 'vidsrcme'},
-    {'name': 'AutoEmbed', 'id': 'autoembed'},
-    {'name': 'Smashy', 'id': 'smashy'},
-    {'name': '2Embed', 'id': 'twoembed'},
-    {'name': 'SuperEmbed', 'id': 'superembed'},
-  ];
+  // ── JavaScript ─────────────────────────────────────────────────────────────
 
-  // ── Ad Blocker JS ─────────────────────────────────────────────────────────
-  static const String _adBlockerScript = '''
+  static const String _layoutFixScript = r'''
+(function(){
+  var m=document.querySelector('meta[name="viewport"]');
+  if(!m){m=document.createElement('meta');m.name='viewport';document.head.appendChild(m);}
+  m.setAttribute('content','width=device-width,initial-scale=1.0,maximum-scale=1.0,user-scalable=no,viewport-fit=cover');
+  var s=document.getElementById('__fsp__');
+  if(!s){s=document.createElement('style');s.id='__fsp__';document.head.appendChild(s);}
+  s.textContent=`
+    html,body{margin:0!important;padding:0!important;width:100vw!important;
+      height:100vh!important;overflow:hidden!important;background:#000!important;
+      position:relative!important;}
+    video{display:block!important;width:100%!important;height:100%!important;
+      max-width:100vw!important;max-height:100vh!important;object-fit:contain!important;
+      position:absolute!important;inset:0!important;margin:auto!important;}
+    iframe{display:block!important;width:100%!important;height:100%!important;
+      border:0!important;position:absolute!important;inset:0!important;}
+    #player,.jw-wrapper,.jwplayer,.plyr,.plyr__video-wrapper,.video-container,
+    .player-container,.video-js,#video-container,.jw-media,.jw-video,
+    [class*="player"],[id*="player"],[class*="video-wrap"]{
+      width:100%!important;height:100%!important;max-width:100vw!important;
+      max-height:100vh!important;position:absolute!important;inset:0!important;}
+  `;
+  window.dispatchEvent(new Event('resize'));
+  window.dispatchEvent(new Event('orientationchange'));
+})();
+''';
+
+  // ENHANCED: More robust video playback watcher with fallback detection
+  static const String _videoPlaybackWatcherScript = r'''
 (function() {
-  // Block all popup windows and new tab opens
-  window.open = function() { return null; };
-  window.alert = function() {};
-  window.confirm = function() { return true; };
-  window.prompt = function() { return null; };
+  if (window.__vpw) return;
+  window.__vpw = true;
+  
+  let videoPlayingDetected = false;
 
-  // Block all ad networks at domain level
-  var adDomains = ['doubleclick','googlesyndication','popads','trafficjunky',
-    'adclick','exoclick','juicyads','ero-advertising','hilltopads','propellerads',
-    'plugrush','adsterra','yllix','admaven','popcash','adcash','revcontent'];
+  function notifyFlutter() {
+    if (!videoPlayingDetected && window.flutter_inappwebview) {
+      videoPlayingDetected = true;
+      window.flutter_inappwebview.callHandler('onVideoPlaying');
+    }
+  }
 
-  // Override XMLHttpRequest to block ad requests
-  var origOpen = XMLHttpRequest.prototype.open;
-  XMLHttpRequest.prototype.open = function(method, url) {
-    if (adDomains.some(d => url && url.includes(d))) return;
-    return origOpen.apply(this, arguments);
-  };
+  function checkVideoStatus() {
+    const videos = document.querySelectorAll('video');
+    for (let v of videos) {
+      // Check if video is actually playing with content
+      if (!v.paused && !v.ended && v.readyState > 2 && v.currentTime > 0) {
+        notifyFlutter();
+        return true;
+      }
+    }
+    return false;
+  }
 
-  // Deep-nuke ad overlays every second
-  function nukeAds() {
-    // Target ad-specific elements
-    var adSelectors = [
-      'div[id*="ad"]', 'div[class*="ad-"]', 'div[class*="ads-"]',
-      'div[class*="popup"]', 'div[class*="overlay"]', 'div[class*="modal"]',
-      'ins.adsbygoogle', 'iframe[src*="ads"]', 'iframe[src*="doubleclick"]',
-      'iframe[src*="googlesyndication"]', 'iframe[src*="popads"]',
-      'a[href*="doubleclick"]', 'a[href*="googlesyndication"]',
-      'div[style*="z-index: 9"]', 'div[style*="z-index:9"]',
-    ];
-    adSelectors.forEach(function(sel) {
-      document.querySelectorAll(sel).forEach(function(el) {
-        // Never remove the actual video player iframe or video tag
-        if (!el.querySelector('video') && !el.querySelector('iframe[src*="embed"]')
-            && !el.querySelector('iframe[src*="vidlink"]') && !el.querySelector('iframe[src*="vidsrc"]')) {
-          el.remove();
-        }
+  function attachWatcher() {
+    document.querySelectorAll('video').forEach(function(v) {
+      if (v.__watched) return;
+      v.__watched = true;
+      
+      // Listen for various playback events
+      ['playing', 'play', 'timeupdate', 'progress'].forEach(eventName => {
+        v.addEventListener(eventName, function() {
+          if (!v.paused && v.currentTime > 0) {
+            notifyFlutter();
+          }
+        });
       });
-    });
-    
-    // Block link clicks that lead to ad domains
-    document.querySelectorAll('a').forEach(function(a) {
-      var href = a.href || '';
-      if (adDomains.some(d => href.includes(d))) {
-        a.addEventListener('click', function(e) { e.preventDefault(); e.stopPropagation(); }, true);
-        a.href = '#';
+      
+      // Also check if already playing
+      if (!v.paused && !v.ended && v.readyState > 2 && v.currentTime > 0) {
+        notifyFlutter();
       }
     });
   }
-  
-  // Run immediately and keep running
-  nukeAds();
-  setInterval(nukeAds, 800);
-  
-  // Intercept any click that could lead to an ad domain
-  document.addEventListener('click', function(e) {
-    var el = e.target;
-    // Walk up the DOM tree to check parents
-    while (el) {
-      var href = (el.href || el.getAttribute && el.getAttribute('href') || '') + '';
-      if (adDomains.some(d => href.includes(d))) {
-        e.preventDefault();
-        e.stopPropagation();
-        return;
+
+  // Try immediately
+  attachWatcher();
+  if (checkVideoStatus()) return;
+
+  // Keep checking for 20 seconds with decreasing frequency
+  let attempts = 0;
+  const maxAttempts = 40; // 20 seconds total
+  const interval = setInterval(function() {
+    attempts++;
+    attachWatcher();
+    if (checkVideoStatus() || attempts >= maxAttempts) {
+      clearInterval(interval);
+      // If we still haven't detected video after 20s, report as failed
+      if (!videoPlayingDetected && attempts >= maxAttempts && window.flutter_inappwebview) {
+        window.flutter_inappwebview.callHandler('onVideoDetectionFailed');
       }
-      el = el.parentElement;
     }
-    // Notify Flutter of the tap so it can reveal the menu
-    if (window.flutter_inappwebview) {
-      window.flutter_inappwebview.callHandler('onTap');
-    }
-  }, true);
+  }, 500);
 })();
 ''';
 
-  // ── Skip Ad JS (Nuclear Option) ────────────────────────────────────────────
-  static const String _skipAdScript = '''
-(function() {
-  // Click any skip buttons
-  ['skip','Skip','SKIP','skip-ad','skipAd','skip_ad','btn-skip'].forEach(function(kw) {
-    document.querySelectorAll('[class*="' + kw + '"],[id*="' + kw + '"],[aria-label*="' + kw + '"]').forEach(function(el) {
-      el.click();
-    });
-  });
-  
-  // Remove all overlay divs (except the real player)
-  document.querySelectorAll('div, aside, section').forEach(function(el) {
-    var style = window.getComputedStyle(el);
-    var zIndex = parseInt(style.zIndex) || 0;
-    var pos = style.position;
-    if ((pos === "fixed" || pos === "absolute") && zIndex > 100) {
-      if (!el.querySelector('video') && !el.querySelector('iframe[src*="embed"]')) {
-        el.remove();
-      }
-    }
-  });
-  
-  // Auto-play the video if paused
-  document.querySelectorAll('video').forEach(function(v) {
-    v.play();
-    v.muted = false;
-  });
-})();
-''';
+  String get _adKillerScript => StreamResolverService.adBlockScript;
 
-  // ── Init ──────────────────────────────────────────────────────────────────
+  // ── Init ───────────────────────────────────────────────────────────────────
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    _currentSeason = widget.season;
-    _currentEpisode = widget.episode;
+    _currentSeason  = widget.season;
     _currentEpisode = widget.episode;
     _calculateEpisodeCount();
 
-    // Do not force landscape on init, allow portrait initially
     SystemChrome.setPreferredOrientations([
       DeviceOrientation.portraitUp,
       DeviceOrientation.landscapeLeft,
@@ -226,41 +208,70 @@ class _NativeStreamPlayerScreenState extends State<NativeStreamPlayerScreen>
     ]);
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
 
-    _controlsAnimController = AnimationController(vsync: this, duration: const Duration(milliseconds: 250));
+    _controlsAnimController = AnimationController(
+        vsync: this, duration: const Duration(milliseconds: 250));
     _controlsFade = Tween<double>(begin: 0.0, end: 1.0).animate(
-      CurvedAnimation(parent: _controlsAnimController, curve: Curves.easeInOut));
+        CurvedAnimation(
+            parent: _controlsAnimController, curve: Curves.easeInOut));
     _controlsAnimController.forward();
 
-    _episodePanelController = AnimationController(vsync: this, duration: const Duration(milliseconds: 300));
-    _episodePanelSlide = Tween<Offset>(begin: const Offset(0, 1), end: Offset.zero).animate(
-      CurvedAnimation(parent: _episodePanelController, curve: Curves.easeOut));
+    _episodePanelController = AnimationController(
+        vsync: this, duration: const Duration(milliseconds: 300));
+    _episodePanelSlide =
+        Tween<Offset>(begin: const Offset(0, 1), end: Offset.zero).animate(
+            CurvedAnimation(
+                parent: _episodePanelController, curve: Curves.easeOut));
 
     _startControlsTimer();
     _resolveAndPlay();
-    // Start periodic progress saver every 10 seconds
-    _progressTimer = Timer.periodic(const Duration(seconds: 10), (_) => _saveProgress());
+    _progressTimer = Timer.periodic(
+        const Duration(seconds: 10), (_) => _saveProgress());
   }
 
-  // ── Stream Resolution ─────────────────────────────────────────────────────
-  Future<void> _resolveAndPlay({int? overrideSeason, int? overrideEpisode}) async {
+  // ── Resolution ─────────────────────────────────────────────────────────────
+  Future<void> _resolveAndPlay(
+      {int? overrideSeason, int? overrideEpisode}) async {
     final s = overrideSeason ?? _currentSeason;
     final e = overrideEpisode ?? _currentEpisode;
 
     setState(() {
-      _isResolving = true;
-      _isUnavailable = false;
-      _isNativeMode = false;
-      _resolvingStatus = 'Searching Consumet for real stream...';
+      _isResolving     = true;
+      _isUnavailable   = false;
+      _isNativeMode    = false;
+      _streamUrl       = null;
+      _resolvingStatus = 'Looking for stream…';
+      _webMirrorIndex  = 0;
+      _videoPlayingDetected = false; // Reset detection flag
+      _mirrorHealth.clear();
     });
+
+    _mirrors = StreamResolverService.getAllEmbedProviders(
+      tmdbId:  widget.id,
+      isMovie: widget.mediaType == 'movie',
+      season:  s,
+      episode: e,
+    );
 
     StreamResult? result;
     try {
       if (widget.mediaType == 'movie') {
-        setState(() => _resolvingStatus = 'Searching FlixHQ for "${widget.title}"...');
-        result = await StreamResolverService.resolveMovie(widget.id, widget.title);
+        result = await StreamResolverService.resolveMovie(
+          widget.id,
+          widget.title,
+          onStatus: (msg) {
+            if (mounted) setState(() => _resolvingStatus = msg);
+          },
+        );
       } else {
-        setState(() => _resolvingStatus = 'Searching for S${s}E$e of "${widget.title}"...');
-        result = await StreamResolverService.resolveTv(widget.id, s, e, widget.title);
+        result = await StreamResolverService.resolveTv(
+          widget.id,
+          s,
+          e,
+          widget.title,
+          onStatus: (msg) {
+            if (mounted) setState(() => _resolvingStatus = msg);
+          },
+        );
       }
     } catch (_) {
       result = null;
@@ -269,200 +280,302 @@ class _NativeStreamPlayerScreenState extends State<NativeStreamPlayerScreen>
     if (!mounted) return;
 
     if (result != null && result.isNative) {
-      // ✅ Got a real native stream — use media_kit
       setState(() {
-        _isResolving = false;
+        _isResolving  = false;
         _isNativeMode = true;
-        _streamUrl = result!.url;
+        _streamUrl    = result!.url;
         _streamSource = result.source;
       });
       await _player.open(Media(_streamUrl!));
-      // Save to history
-      if (mounted) {
-        Provider.of<DatabaseService>(context, listen: false).addToHistory(
-          {'id': widget.id, 'title': widget.title, 'poster_path': null, 'media_type': widget.mediaType},
-          season: widget.mediaType == 'tv' ? _currentSeason : null,
-          episode: widget.mediaType == 'tv' ? _currentEpisode : null,
-        );
-      }
+      _addToHistory();
     } else if (result != null && !result.isNative) {
-      // ⚠️ Fallback to WebView with best embed URL
+      final resolvedIndex = _mirrors.indexWhere(
+              (m) => m['name'] == result!.source.replaceAll(' (fallback)', ''));
       setState(() {
-        _isResolving = false;
-        _isNativeMode = false;
-        _streamUrl = result!.url;
-        _streamSource = result.source;
-        _webMirrorIndex = 0;
-        _webLoading = true;
+        _isResolving    = false;
+        _isNativeMode   = false;
+        _streamUrl      = result!.url;
+        _streamSource   = result.source;
+        _webMirrorIndex = resolvedIndex >= 0 ? resolvedIndex : 0;
+        _webLoading     = true;
+        _webViewKey     = UniqueKey();
       });
       _startWebLoadingTimeout();
-      // Save to history even for web embeds
-      if (mounted) {
-        Provider.of<DatabaseService>(context, listen: false).addToHistory(
-          {'id': widget.id, 'title': widget.title, 'poster_path': null, 'media_type': widget.mediaType},
-          season: widget.mediaType == 'tv' ? _currentSeason : null,
-          episode: widget.mediaType == 'tv' ? _currentEpisode : null,
-        );
-      }
+      _addToHistory();
     } else {
-      // ❌ Total failure
       setState(() {
-        _isResolving = false;
+        _isResolving   = false;
         _isUnavailable = true;
       });
     }
   }
 
-  String _buildWebUrl(int mirrorIndex) {
-    final m = _mirrors[mirrorIndex]['id']!;
-    final id = widget.id;
-    final s = _currentSeason;
-    final e = _currentEpisode;
-    final isMovie = widget.mediaType == 'movie';
-
-    switch (m) {
-      case 'vidlink': return isMovie
-          ? 'https://vidlink.pro/movie/$id?autoplay=true&primaryColor=6C63FF'
-          : 'https://vidlink.pro/tv/$id/$s/$e?autoplay=true&primaryColor=6C63FF';
-      case 'vidsrc': return isMovie
-          ? 'https://vidsrc.to/embed/movie/$id'
-          : 'https://vidsrc.to/embed/tv/$id/$s/$e';
-      case 'embedsu': return isMovie
-          ? 'https://embed.su/embed/movie/$id'
-          : 'https://embed.su/embed/tv/$id/$s/$e';
-      case 'vidsrccc': return isMovie
-          ? 'https://vidsrc.cc/v2/embed/movie/$id'
-          : 'https://vidsrc.cc/v2/embed/tv/$id/$s/$e';
-      case 'vidsrcme': return isMovie
-          ? 'https://vidsrc.me/embed/movie?tmdb=$id'
-          : 'https://vidsrc.me/embed/tv?tmdb=$id&season=$s&episode=$e';
-      case 'autoembed': return isMovie
-          ? 'https://autoembed.co/movie/tmdb/$id'
-          : 'https://autoembed.co/tv/tmdb/$id-$s-$e';
-      case 'smashy': return isMovie
-          ? 'https://embed.smashystream.com/playere.php?tmdb=$id'
-          : 'https://embed.smashystream.com/playere.php?tmdb=$id&season=$s&episode=$e';
-      case 'twoembed': return isMovie
-          ? 'https://www.2embed.cc/embed/$id'
-          : 'https://www.2embed.cc/embedtv/$id&s=$s&e=$e';
-      case 'superembed': return isMovie
-          ? 'https://multiembed.mov/?video_id=$id&tmdb=1'
-          : 'https://multiembed.mov/?video_id=$id&tmdb=1&s=$s&e=$e';
-      default: return 'https://vidlink.pro/movie/$id';
-    }
+  void _addToHistory() {
+    if (!mounted) return;
+    Provider.of<DatabaseService>(context, listen: false).addToHistory(
+      {
+        'id': widget.id,
+        'title': widget.title,
+        'poster_path': null,
+        'media_type': widget.mediaType,
+      },
+      season:  widget.mediaType == 'tv' ? _currentSeason  : null,
+      episode: widget.mediaType == 'tv' ? _currentEpisode : null,
+    );
   }
 
-  void _switchWebMirror(int index) {
+  // ── Mirror helpers ─────────────────────────────────────────────────────────
+  String _mirrorUrl(int index) {
+    if (_mirrors.isEmpty) return '';
+    if (index >= _mirrors.length) index = 0;
+    return _mirrors[index]['url'] ?? '';
+  }
+
+  void _switchMirror(int index) {
+    if (index == _webMirrorIndex && !_webLoading) return;
+
+    // Cancel any existing timers
+    _loadingTimeout?.cancel();
+    _videoDetectionTimer?.cancel();
+
     setState(() {
-      _webMirrorIndex = index;
-      _webLoading = true;
-      _mirrorHealth[index] = null; // Reset health on manual switch
+      _webMirrorIndex      = index;
+      _webLoading          = true;
+      _videoPlayingDetected = false; // Reset detection flag
+      _mirrorHealth[index] = null;
+      _autoSwitchTriggered = false;
+      _webViewKey          = UniqueKey();
     });
     _startWebLoadingTimeout();
-    _webController?.loadUrl(urlRequest: URLRequest(url: Uri.parse(_buildWebUrl(index))));
   }
 
+  // ENHANCED: Smarter timeout with video detection polling
   void _startWebLoadingTimeout() {
     _loadingTimeout?.cancel();
+    _videoDetectionTimer?.cancel();
     _autoSwitchTriggered = false;
-    _loadingTimeout = Timer(const Duration(seconds: 12), () {
-      // Auto-switch to next mirror if current one stalls
-      if (mounted && _webLoading && !_autoSwitchTriggered) {
-        final nextIndex = (_webMirrorIndex + 1) % _mirrors.length;
-        _autoSwitchTriggered = true;
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('${_mirrors[_webMirrorIndex]["name"]} timed out — switching to ${_mirrors[nextIndex]["name"]}...', 
-                style: const TextStyle(color: Colors.white)),
-              backgroundColor: Colors.black87,
-              duration: const Duration(seconds: 2),
-              behavior: SnackBarBehavior.floating,
-            ),
-          );
-        }
-        _switchWebMirror(nextIndex);
-      }
+    _videoPlayingDetected = false;
+
+    // Start the main timeout (45 seconds - increased from 30 for slow servers)
+    _loadingTimeout = Timer(const Duration(seconds: 45), () {
+      if (!mounted || _autoSwitchTriggered || _videoPlayingDetected) return;
+
+      // Double-check if video is playing before switching
+      _checkVideoStatusBeforeSwitch();
     });
+
+    // Start periodic video detection checks
+    _startVideoDetectionPolling();
+  }
+
+  // NEW: Actively poll for video playback status
+  void _startVideoDetectionPolling() {
+    _videoDetectionTimer?.cancel();
+    _videoDetectionTimer = Timer.periodic(const Duration(seconds: 2), (timer) {
+      if (!mounted || _videoPlayingDetected || _webController == null) {
+        timer.cancel();
+        return;
+      }
+
+      _webController?.evaluateJavascript(source: r'''
+        (function() {
+          var videos = document.querySelectorAll('video');
+          for (var i = 0; i < videos.length; i++) {
+            var v = videos[i];
+            if (!v.paused && !v.ended && v.readyState > 2 && v.currentTime > 0.5) {
+              return true;
+            }
+          }
+          return false;
+        })();
+      ''').then((result) {
+        if (result == true && mounted && !_videoPlayingDetected) {
+          _onVideoPlayingDetected();
+          timer.cancel();
+        }
+      });
+    });
+  }
+
+  // NEW: Check video status before switching mirrors
+  void _checkVideoStatusBeforeSwitch() {
+    if (_webController == null || !mounted || _videoPlayingDetected) return;
+
+    _webController?.evaluateJavascript(source: r'''
+      (function() {
+        var videos = document.querySelectorAll('video');
+        for (var i = 0; i < videos.length; i++) {
+          var v = videos[i];
+          if (!v.paused && !v.ended && v.readyState > 2 && v.currentTime > 0) {
+            return 'playing';
+          }
+          if (v.readyState > 0 && v.duration > 0) {
+            return 'loaded';
+          }
+        }
+        return 'none';
+      })();
+    ''').then((status) {
+      if (!mounted || _videoPlayingDetected) return;
+
+      if (status == 'playing') {
+        // Video is actually playing, don't switch!
+        _onVideoPlayingDetected();
+      } else if (status == 'loaded') {
+        // Video is loaded but not playing yet, give it more time
+        // Extend the timeout by 15 more seconds
+        _loadingTimeout?.cancel();
+        _loadingTimeout = Timer(const Duration(seconds: 15), () {
+          if (!mounted || _videoPlayingDetected || _autoSwitchTriggered) return;
+          _switchToNextMirror();
+        });
+      } else {
+        // No video found, switch to next mirror
+        _switchToNextMirror();
+      }
+    }).catchError((_) {
+      if (!mounted || _videoPlayingDetected) return;
+      _switchToNextMirror();
+    });
+  }
+
+  // NEW: Handle video playing detection
+  void _onVideoPlayingDetected() {
+    if (!mounted || _videoPlayingDetected) return;
+
+    _videoPlayingDetected = true;
+    _loadingTimeout?.cancel();
+    _videoDetectionTimer?.cancel();
+
+    setState(() {
+      _webLoading = false;
+      _mirrorHealth[_webMirrorIndex] = true;
+    });
+
+    // Show success feedback
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(
+        '✓ ${_mirrors[_webMirrorIndex]["name"]} - Playing',
+        style: const TextStyle(color: Colors.white),
+      ),
+      backgroundColor: Colors.green.withOpacity(0.8),
+      duration: const Duration(seconds: 2),
+      behavior: SnackBarBehavior.floating,
+    ));
+  }
+
+  // NEW: Switch to next mirror with feedback
+  void _switchToNextMirror() {
+    if (_autoSwitchTriggered || _videoPlayingDetected) return;
+
+    final next = (_webMirrorIndex + 1) % _mirrors.length;
+    _autoSwitchTriggered = true;
+
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(
+        '${_mirrors[_webMirrorIndex]["name"]} unavailable — trying ${_mirrors[next]["name"]}…',
+        style: const TextStyle(color: Colors.white),
+      ),
+      backgroundColor: Colors.black87,
+      duration: const Duration(seconds: 2),
+      behavior: SnackBarBehavior.floating,
+    ));
+    _switchMirror(next);
   }
 
   void _switchEpisode(int ep) {
     setState(() {
-      _currentEpisode = ep;
+      _currentEpisode        = ep;
       _isEpisodePanelVisible = false;
     });
     _episodePanelController.reverse();
-    if (_isNativeMode) {
-      _resolveAndPlay(overrideSeason: _currentSeason, overrideEpisode: ep);
-    } else {
-      _webController?.loadUrl(urlRequest: URLRequest(url: Uri.parse(_buildWebUrl(_webMirrorIndex))));
-    }
+    _resolveAndPlay(overrideSeason: _currentSeason, overrideEpisode: ep);
   }
 
   void _switchSeason(int s) {
-    setState(() { _currentSeason = s; _currentEpisode = 1; });
+    setState(() {
+      _currentSeason  = s;
+      _currentEpisode = 1;
+    });
     _calculateEpisodeCount();
-    if (_isNativeMode) {
-      _resolveAndPlay(overrideSeason: s, overrideEpisode: 1);
-    } else {
-      _webController?.loadUrl(urlRequest: URLRequest(url: Uri.parse(_buildWebUrl(_webMirrorIndex))));
-    }
+    _resolveAndPlay(overrideSeason: s, overrideEpisode: 1);
   }
 
   void _calculateEpisodeCount() {
     if (widget.seasons.isNotEmpty) {
       final s = widget.seasons.firstWhere(
-        (s) => s['season_number'] == _currentSeason,
-        orElse: () => widget.seasons.first);
-      _episodeCount = s['episode_count'] ?? 10;
+            (s) => s['season_number'] == _currentSeason,
+        orElse: () => widget.seasons.first,
+      );
+      _episodeCount = (s['episode_count'] as int?) ?? 10;
     }
   }
 
-  // ── Controls ──────────────────────────────────────────────────────────────
+  // ── Controls ───────────────────────────────────────────────────────────────
   void _startControlsTimer() {
     _controlsTimer?.cancel();
     if (_isLocked) return;
     _controlsTimer = Timer(const Duration(seconds: 4), () {
-      if (mounted) { setState(() => _isControlsVisible = false); _controlsAnimController.reverse(); }
+      if (mounted) {
+        setState(() => _isControlsVisible = false);
+        _controlsAnimController.reverse();
+      }
     });
   }
 
   void _toggleControls() {
     if (_isLocked) return;
     setState(() => _isControlsVisible = !_isControlsVisible);
-    if (_isControlsVisible) { _controlsAnimController.forward(); _startControlsTimer(); }
-    else { _controlsAnimController.reverse(); _controlsTimer?.cancel(); }
+    if (_isControlsVisible) {
+      _controlsAnimController.forward();
+      _startControlsTimer();
+    } else {
+      _controlsAnimController.reverse();
+      _controlsTimer?.cancel();
+    }
   }
 
   void _handleVerticalDrag(DragUpdateDetails d, bool isLeft) async {
     final delta = -d.primaryDelta! / 250.0;
     if (isLeft) {
-      setState(() { _brightness = (_brightness + delta).clamp(0.0, 1.0); _showBrightnessOverlay = true; });
+      setState(() {
+        _brightness            = (_brightness + delta).clamp(0.0, 1.0);
+        _showBrightnessOverlay = true;
+      });
       try { await ScreenBrightness().setScreenBrightness(_brightness); } catch (_) {}
     } else {
-      setState(() { _volume = (_volume + delta).clamp(0.0, 1.0); _showVolumeOverlay = true; });
+      setState(() {
+        _volume            = (_volume + delta).clamp(0.0, 1.0);
+        _showVolumeOverlay = true;
+      });
       if (_isNativeMode) {
         _player.setVolume(_volume * 100);
       } else {
-        _webController?.evaluateJavascript(source:
-          'var v=document.querySelector("video"); if(v) v.volume=${_volume.toStringAsFixed(2)};');
+        _webController?.evaluateJavascript(
+            source:
+            'var v=document.querySelector("video");if(v)v.volume=${_volume.toStringAsFixed(2)};');
       }
     }
   }
 
-  void _handleVerticalDragEnd(bool isLeft) {
+  void _handleVerticalDragEnd(bool _) {
     Future.delayed(const Duration(seconds: 1), () {
-      if (mounted) setState(() { _showBrightnessOverlay = false; _showVolumeOverlay = false; });
+      if (mounted) {
+        setState(() {
+          _showBrightnessOverlay = false;
+          _showVolumeOverlay     = false;
+        });
+      }
     });
   }
 
   void _seekRelative(int seconds) {
     if (_isNativeMode) {
-      final pos = _player.state.position + Duration(seconds: seconds);
-      _player.seek(pos);
+      _player.seek(_player.state.position + Duration(seconds: seconds));
     } else {
-      _webController?.evaluateJavascript(source:
-        'var v=document.querySelector("video"); if(v) v.currentTime+=$seconds;');
+      _webController?.evaluateJavascript(
+          source:
+          'var v=document.querySelector("video");if(v)v.currentTime+=$seconds;');
     }
     _showControlsBriefly();
   }
@@ -477,17 +590,20 @@ class _NativeStreamPlayerScreenState extends State<NativeStreamPlayerScreen>
     if (_isNativeMode) {
       _player.playOrPause();
     } else {
-      _webController?.evaluateJavascript(source:
-        'var v=document.querySelector("video"); if(v) { v.paused ? v.play() : v.pause(); }');
+      _webController?.evaluateJavascript(
+          source:
+          'var v=document.querySelector("video");if(v){v.paused?v.play():v.pause();}');
     }
   }
 
   void _toggleEpisodePanel() {
     setState(() => _isEpisodePanelVisible = !_isEpisodePanelVisible);
-    _isEpisodePanelVisible ? _episodePanelController.forward() : _episodePanelController.reverse();
+    _isEpisodePanelVisible
+        ? _episodePanelController.forward()
+        : _episodePanelController.reverse();
   }
 
-  // ── Lifecycle ─────────────────────────────────────────────────────────────
+  // ── Lifecycle ──────────────────────────────────────────────────────────────
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.paused) {
@@ -496,12 +612,24 @@ class _NativeStreamPlayerScreenState extends State<NativeStreamPlayerScreen>
   }
 
   @override
+  void didChangeMetrics() {
+    super.didChangeMetrics();
+    if (_isNativeMode || _webController == null) return;
+    _resizeDebounce?.cancel();
+    _resizeDebounce = Timer(const Duration(milliseconds: 200), () {
+      if (!mounted) return;
+      _webController?.evaluateJavascript(source: _layoutFixScript);
+    });
+  }
+
+  @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _controlsTimer?.cancel();
-    _unavailableTimer?.cancel();
     _loadingTimeout?.cancel();
+    _videoDetectionTimer?.cancel();
     _progressTimer?.cancel();
+    _resizeDebounce?.cancel();
     _controlsAnimController.dispose();
     _episodePanelController.dispose();
     _player.dispose();
@@ -513,15 +641,13 @@ class _NativeStreamPlayerScreenState extends State<NativeStreamPlayerScreen>
 
   void _saveProgress() {
     if (!mounted || !_isNativeMode) return;
-    final db = Provider.of<DatabaseService>(context, listen: false);
+    final db  = Provider.of<DatabaseService>(context, listen: false);
     final pos = _player.state.position.inSeconds;
     final dur = _player.state.duration.inSeconds;
-    if (dur > 0) {
-      db.updateHistoryProgress(widget.id, pos, dur);
-    }
+    if (dur > 0) db.updateHistoryProgress(widget.id, pos, dur);
   }
 
-  // ── Build ─────────────────────────────────────────────────────────────────
+  // ── Build ──────────────────────────────────────────────────────────────────
   @override
   Widget build(BuildContext context) {
     return WillPopScope(
@@ -532,501 +658,872 @@ class _NativeStreamPlayerScreenState extends State<NativeStreamPlayerScreen>
       },
       child: Scaffold(
         backgroundColor: Colors.black,
-        body: Stack(
-          children: [
-            // ── 1. Video area ──────────────────────────────────────────────
-            Positioned.fill(child: _buildVideoArea()),
+        body: Stack(children: [
 
-            // ── 2. Gesture overlay (Native Mode Only) ──────────────────────
-            if (_isNativeMode && !_isResolving && !_isUnavailable)
-              _buildGestureLayer(),
+          SizedBox.expand(child: _buildVideoArea()),
 
-            // ── 3. Resolving overlay ───────────────────────────────────────
-            if (_isResolving) _buildResolvingOverlay(),
+          if (_isNativeMode && !_isResolving && !_isUnavailable)
+            _buildGestureLayer(),
 
-            // ── 4. Unavailable overlay ─────────────────────────────────────
-            if (_isUnavailable) _buildUnavailableOverlay(),
+          if (_isResolving) _buildResolvingOverlay(),
 
-            // ── 5. Controls ─────────────────────────────────────────────────
-            if (!_isLocked && !_isResolving && !_isUnavailable)
-              FadeTransition(opacity: _controlsFade, child: _buildControlsOverlay()),
+          if (_isUnavailable) _buildUnavailableOverlay(),
 
-            // ── 6. Lock indicator ──────────────────────────────────────────
-            if (_isLocked) _buildLockIndicator(),
+          if (!_isLocked && !_isResolving && !_isUnavailable)
+            Positioned.fill(
+              child: FadeTransition(
+                opacity: _controlsFade,
+                child: SizedBox.expand(
+                    child: Stack(children: [_buildControlsOverlay()])),
+              ),
+            ),
 
-            // ── 7. Brightness/Volume overlays ──────────────────────────────
-            if (_showBrightnessOverlay)
-              Positioned(left: 40, top: 0, bottom: 0, child: Center(
-                child: _buildSliderIndicator(Icons.brightness_6, _brightness, Colors.yellow))),
-            if (_showVolumeOverlay)
-              Positioned(right: 40, top: 0, bottom: 0, child: Center(
-                child: _buildSliderIndicator(Icons.volume_up, _volume, Colors.white))),
+          if (_isLocked) _buildLockIndicator(),
 
-            // ── 8. Episode panel ────────────────────────────────────────────
-            if (widget.mediaType == 'tv')
-              SlideTransition(position: _episodePanelSlide,
-                child: Align(alignment: Alignment.bottomCenter, child: _buildEpisodePanel())),
+          if (_showBrightnessOverlay)
+            Positioned(
+              left: 40, top: 0, bottom: 0,
+              child: Center(
+                  child: _buildSliderIndicator(
+                      Icons.brightness_6, _brightness, Colors.yellowAccent)),
+            ),
+          if (_showVolumeOverlay)
+            Positioned(
+              right: 40, top: 0, bottom: 0,
+              child: Center(
+                  child: _buildSliderIndicator(
+                      Icons.volume_up, _volume, Colors.white)),
+            ),
 
-            // ── 9. Web Mode: Tap-to-Wake Menu + Skip Ad Button ──────────────────
-            if (!_isNativeMode && !_isResolving && !_isUnavailable) ...[
-              // Menu button always visible in top-left corner
-              if (!_isControlsVisible)
-                Positioned(
-                  top: 44,
-                  left: 16,
-                  child: GestureDetector(
-                    onTap: _toggleControls,
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
-                      decoration: BoxDecoration(
-                        color: Colors.black.withOpacity(0.65),
-                        borderRadius: BorderRadius.circular(20),
-                        border: Border.all(color: Colors.white24),
-                      ),
-                      child: const Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(Icons.menu, color: Colors.white, size: 16),
-                          SizedBox(width: 6),
-                          Text('Menu', style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold)),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
+          if (widget.mediaType == 'tv')
+            SlideTransition(
+              position: _episodePanelSlide,
+              child: Align(
+                  alignment: Alignment.bottomCenter,
+                  child: _buildEpisodePanel()),
+            ),
 
-              // Skip Ad button always visible in top-right corner
-              Positioned(
-                top: 44,
-                right: 16,
-                child: GestureDetector(
-                  onTap: () async {
-                    await _webController?.evaluateJavascript(source: _skipAdScript);
-                    if (mounted) ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(
-                        content: Text('\u26a1 Ad Nuke fired!', style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
-                        backgroundColor: Color(0xFF6C63FF),
-                        duration: Duration(seconds: 1),
-                        behavior: SnackBarBehavior.floating,
-                      ),
-                    );
+          if (!_isNativeMode && !_isResolving && !_isUnavailable &&
+              !_isControlsVisible)
+            Positioned(
+              top: 44, left: 16,
+              child: _floatingPill(
+                onTap: _toggleControls,
+                color: Colors.black.withOpacity(0.72),
+                borderColor: Colors.white24,
+                child: const Row(mainAxisSize: MainAxisSize.min, children: [
+                  Icon(Icons.menu_rounded, color: Colors.white, size: 15),
+                  SizedBox(width: 6),
+                  Text('Menu',
+                      style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600)),
+                ]),
+              ),
+            ),
+        ]),
+      ),
+    );
+  }
+
+  // ── Video area ─────────────────────────────────────────────────────────────
+  Widget _buildVideoArea() {
+    if (_isResolving || _isUnavailable) {
+      return const ColoredBox(color: Colors.black);
+    }
+
+    if (_isNativeMode && _streamUrl != null) {
+      return Video(controller: _videoController);
+    }
+
+    return SizedBox.expand(
+      child: Stack(fit: StackFit.expand, children: [
+        InAppWebView(
+          key: _webViewKey,
+          initialUrlRequest:
+          URLRequest(url: WebUri(_mirrorUrl(_webMirrorIndex))),
+          initialSettings: InAppWebViewSettings(
+            mediaPlaybackRequiresUserGesture: false,
+            javaScriptEnabled: true,
+            transparentBackground: true,
+            disableContextMenu: true,
+            supportZoom: false,
+            userAgent: 'Mozilla/5.0 (Linux; Android 12; Pixel 6) '
+                'AppleWebKit/537.36 (KHTML, like Gecko) '
+                'Chrome/115.0.0.0 Mobile Safari/537.36',
+            useHybridComposition: true,
+            hardwareAcceleration: true,
+            useWideViewPort: true,
+            loadWithOverviewMode: true,
+            contentBlockers: _buildContentBlockers(),
+          ),
+          onWebViewCreated: (ctrl) {
+            _webController = ctrl;
+
+            // ENHANCED: Video playing handler with immediate cancellation
+            ctrl.addJavaScriptHandler(
+              handlerName: 'onVideoPlaying',
+              callback: (_) {
+                _onVideoPlayingDetected();
+              },
+            );
+
+            // NEW: Handle video detection failure
+            ctrl.addJavaScriptHandler(
+              handlerName: 'onVideoDetectionFailed',
+              callback: (_) {
+                if (!mounted || _videoPlayingDetected || _autoSwitchTriggered) return;
+                // If no video detected after 20 seconds, switch to next mirror
+                _switchToNextMirror();
+              },
+            );
+
+            ctrl.addJavaScriptHandler(
+              handlerName: 'onTap',
+              callback: (_) {
+                if (mounted && !_isControlsVisible) _toggleControls();
+              },
+            );
+          },
+          onCreateWindow: (_, __) async => false,
+          onLoadStart: (_, __) {
+            if (mounted) setState(() => _webLoading = true);
+          },
+          onLoadStop: (ctrl, _) async {
+            if (mounted) {
+              setState(() {
+                _webLoading = false;
+                _mirrorHealth[_webMirrorIndex] = true;
+              });
+            }
+
+            // Apply layout fixes and ad blocking
+            await ctrl.evaluateJavascript(source: _layoutFixScript);
+            await ctrl.evaluateJavascript(source: _adKillerScript);
+
+            // Inject the enhanced video playback watcher
+            await ctrl.evaluateJavascript(
+                source: _videoPlaybackWatcherScript);
+
+            // Allow a moment for scripts to initialize
+            await Future.delayed(const Duration(milliseconds: 800));
+
+            // Apply layout fixes again after delay
+            if (mounted) {
+              await ctrl.evaluateJavascript(source: _layoutFixScript);
+
+              // Check if video is already playing after page load
+              if (!_videoPlayingDetected) {
+                _checkVideoStatusAfterLoad(ctrl);
+              }
+            }
+          },
+          onReceivedError: (_, __, ___) {
+            if (!mounted || _videoPlayingDetected) return;
+            setState(() {
+              _webLoading                    = false;
+              _mirrorHealth[_webMirrorIndex] = false;
+            });
+            if (!_autoSwitchTriggered) {
+              _switchToNextMirror();
+            }
+          },
+          onReceivedHttpError: (_, __, response) {
+            if (!mounted || _videoPlayingDetected) return;
+            if ((response.statusCode ?? 0) >= 400) {
+              setState(() {
+                _webLoading                    = false;
+                _mirrorHealth[_webMirrorIndex] = false;
+              });
+              if (!_autoSwitchTriggered) {
+                _switchToNextMirror();
+              }
+            }
+          },
+          shouldOverrideUrlLoading: (ctrl, action) async {
+            final url     = action.request.url?.toString() ?? '';
+            final navHost = Uri.tryParse(url)?.host ?? '';
+
+            if (action.isForMainFrame == true) {
+              final currentHost =
+                  Uri.tryParse(_mirrorUrl(_webMirrorIndex))?.host ?? '';
+              if (navHost == currentHost ||
+                  navHost.endsWith('.$currentHost')) {
+                return NavigationActionPolicy.ALLOW;
+              }
+
+              const safeHosts = [
+                'vidlink.pro', 'vidsrc.fyi', 'vidsrc.to', 'vidsrc.cc',
+                'vidsrc-embed.ru', 'vidsrc.me', 'embed.su', 'autoembed.co',
+                'smashystream.com', '2embed.cc', 'multiembed.mov',
+                'vidfast.pro', 'jwplatform.com', 'jwpcdn.com',
+                'filemoon.sx', 'streamtape.com', 'doodstream.com',
+                'mixdrop.co', 'upstream.to', 'fembed.com',
+              ];
+              if (safeHosts
+                  .any((h) => navHost == h || navHost.endsWith('.$h'))) {
+                return NavigationActionPolicy.ALLOW;
+              }
+
+              return NavigationActionPolicy.CANCEL;
+            }
+
+            return NavigationActionPolicy.ALLOW;
+          },
+        ),
+
+        if (_webLoading) _buildWebLoadingOverlay(),
+      ]),
+    );
+  }
+
+  // NEW: Check video status after page load
+  void _checkVideoStatusAfterLoad(InAppWebViewController ctrl) {
+    ctrl.evaluateJavascript(source: r'''
+      (function() {
+        var videos = document.querySelectorAll('video');
+        for (var i = 0; i < videos.length; i++) {
+          var v = videos[i];
+          if (!v.paused && !v.ended && v.readyState > 2 && v.currentTime > 0) {
+            return 'playing';
+          }
+          if (v.readyState > 0) {
+            return 'loaded';
+          }
+        }
+        return 'none';
+      })();
+    ''').then((status) {
+      if (!mounted || _videoPlayingDetected) return;
+
+      if (status == 'playing') {
+        _onVideoPlayingDetected();
+      }
+    });
+  }
+
+  List<ContentBlocker> _buildContentBlockers() {
+    return StreamResolverService.adBlockDomains.map((domain) => ContentBlocker(
+      trigger: ContentBlockerTrigger(
+        urlFilter: '.*',
+        ifDomain: [domain],
+      ),
+      action: ContentBlockerAction(
+        type: ContentBlockerActionType.BLOCK,
+      ),
+    )).toList();
+  }
+
+  // ── Resolving overlay ──────────────────────────────────────────────────────
+  Widget _buildResolvingOverlay() {
+    return Container(
+      color: Colors.black,
+      child: Center(
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          SizedBox(
+            width: 56, height: 56,
+            child: CircularProgressIndicator(
+                color: AppTheme.accent, strokeWidth: 2.5),
+          ),
+          const SizedBox(height: 22),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 40),
+            child: Text(
+              _resolvingStatus,
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                  color: Colors.white70,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w500),
+            ),
+          ),
+          const SizedBox(height: 8),
+          const Text(
+            'Finding the best available source…',
+            style: TextStyle(color: Colors.white30, fontSize: 11),
+          ),
+        ]),
+      ),
+    );
+  }
+
+  // ── Unavailable overlay ────────────────────────────────────────────────────
+  Widget _buildUnavailableOverlay() {
+    return Container(
+      color: Colors.black.withOpacity(0.96),
+      child: Center(
+        child: Padding(
+          padding: const EdgeInsets.all(28),
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            Container(
+              width: 72, height: 72,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: Colors.red.withOpacity(0.12),
+                border: Border.all(
+                    color: Colors.redAccent.withOpacity(0.5), width: 2),
+              ),
+              child: const Icon(Icons.movie_filter_outlined,
+                  color: Colors.redAccent, size: 36),
+            ),
+            const SizedBox(height: 20),
+            const Text('Not Available',
+                style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 22,
+                    fontWeight: FontWeight.bold)),
+            const SizedBox(height: 10),
+            const Text(
+              'This title couldn\'t be found on any source.\nTry a mirror directly:',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                  color: Colors.white54, fontSize: 13, height: 1.5),
+            ),
+            const SizedBox(height: 20),
+            Wrap(
+              spacing: 8, runSpacing: 8,
+              alignment: WrapAlignment.center,
+              children: List.generate(_mirrors.length, (i) {
+                return GestureDetector(
+                  onTap: () {
+                    setState(() {
+                      _isUnavailable  = false;
+                      _isNativeMode   = false;
+                      _webMirrorIndex = i;
+                      _streamUrl      = _mirrorUrl(i);
+                      _webLoading     = true;
+                      _videoPlayingDetected = false;
+                      _webViewKey     = UniqueKey();
+                    });
+                    _startWebLoadingTimeout();
                   },
                   child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 14, vertical: 8),
                     decoration: BoxDecoration(
-                      color: const Color(0xFF6C63FF).withOpacity(0.85),
-                      borderRadius: BorderRadius.circular(20),
+                      color: Colors.white10,
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(color: Colors.white24),
                     ),
-                    child: const Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(Icons.skip_next, color: Colors.white, size: 16),
-                        SizedBox(width: 6),
-                        Text('Skip Ad', style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold)),
-                      ],
-                    ),
+                    child: Text(_mirrors[i]['name']!,
+                        style: const TextStyle(
+                            color: Colors.white70, fontSize: 12)),
                   ),
-                ),
+                );
+              }),
+            ),
+            const SizedBox(height: 20),
+            ElevatedButton.icon(
+              onPressed: _resolveAndPlay,
+              icon: const Icon(Icons.refresh_rounded, color: Colors.black),
+              label: const Text('Try Again',
+                  style: TextStyle(
+                      color: Colors.black, fontWeight: FontWeight.bold)),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppTheme.accent,
+                padding: const EdgeInsets.symmetric(
+                    horizontal: 28, vertical: 14),
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(14)),
               ),
-            ],
-          ],
+            ),
+            const SizedBox(height: 12),
+            OutlinedButton.icon(
+              onPressed: () {
+                SystemChrome.setPreferredOrientations(
+                    [DeviceOrientation.portraitUp]);
+                SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+                Navigator.pop(context);
+              },
+              icon: const Icon(Icons.arrow_back_rounded,
+                  color: Colors.white70),
+              label: const Text('Go Back',
+                  style: TextStyle(color: Colors.white70)),
+              style: OutlinedButton.styleFrom(
+                side: const BorderSide(color: Colors.white24),
+                padding: const EdgeInsets.symmetric(
+                    horizontal: 28, vertical: 14),
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(14)),
+              ),
+            ),
+          ]),
         ),
       ),
     );
   }
 
-  // ── Video Area ────────────────────────────────────────────────────────────
-  Widget _buildVideoArea() {
-    if (_isResolving || _isUnavailable) {
-      return Container(color: Colors.black);
-    }
-    if (_isNativeMode && _streamUrl != null) {
-      return Video(controller: _videoController);
-    }
-    // WebView fallback
-    return Stack(
-      children: [
-        InAppWebView(
-          initialUrlRequest: URLRequest(url: Uri.parse(_streamUrl ?? _buildWebUrl(0))),
-          initialOptions: InAppWebViewGroupOptions(
-            crossPlatform: InAppWebViewOptions(
-              mediaPlaybackRequiresUserGesture: false,
-              javaScriptEnabled: true,
-              transparentBackground: true,
-              disableContextMenu: true,
-              supportZoom: false,
-              userAgent: 'Mozilla/5.0 (Linux; Android 12; Pixel 6) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Mobile Safari/537.36',
-            ),
-            android: AndroidInAppWebViewOptions(useHybridComposition: true, hardwareAcceleration: true),
+  // ── Web loading overlay ────────────────────────────────────────────────────
+  Widget _buildWebLoadingOverlay() {
+    return Container(
+      color: Colors.black.withOpacity(0.92),
+      child: Center(
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          SizedBox(
+            width: 52, height: 52,
+            child: CircularProgressIndicator(
+                color: AppTheme.accent, strokeWidth: 2.5),
           ),
-          onWebViewCreated: (ctrl) {
-            _webController = ctrl;
-            ctrl.addJavaScriptHandler(handlerName: 'onTap', callback: (_) {
-              if (mounted && !_isControlsVisible) _toggleControls();
-            });
-          },
-          onCreateWindow: (_, __) async => false, // Block popup windows/new tabs
-          onLoadStart: (_, __) => setState(() => _webLoading = true),
-          onLoadStop: (ctrl, _) async {
-            setState(() {
-              _webLoading = false;
-              _mirrorHealth[_webMirrorIndex] = true; // Mark current mirror as healthy
-            });
-            await ctrl.evaluateJavascript(source: _adBlockerScript);
-          },
-          shouldOverrideUrlLoading: (_, action) async {
-            final url = action.request.url?.toString() ?? '';
-            final allowed = ['vidsrc','vidlink','embed','multiembed','smash','autoembed','2embed'];
-            if (!allowed.any((k) => url.contains(k))) return NavigationActionPolicy.CANCEL;
-            return NavigationActionPolicy.ALLOW;
-          },
-        ),
-        if (_webLoading)
-          Container(color: Colors.black87, child: Center(
-            child: Column(mainAxisSize: MainAxisSize.min, children: [
-              CircularProgressIndicator(color: AppTheme.accent, strokeWidth: 3),
-              const SizedBox(height: 16),
-              Text('Loading ${_mirrors[_webMirrorIndex]['name']}...',
-                style: const TextStyle(color: Colors.white70, fontSize: 13)),
-            ]),
-          )),
-      ],
+          const SizedBox(height: 18),
+          Text(
+            'Loading ${_mirrors.isNotEmpty ? _mirrors[_webMirrorIndex]["name"] : ""}…',
+            style: const TextStyle(
+                color: Colors.white70,
+                fontSize: 13,
+                fontWeight: FontWeight.w500),
+          ),
+          const SizedBox(height: 6),
+          Text('Mirror ${_webMirrorIndex + 1} of ${_mirrors.length}',
+              style: const TextStyle(color: Colors.white30, fontSize: 11)),
+          const SizedBox(height: 24),
+          if (_mirrors.isNotEmpty)
+            SizedBox(
+              height: 34,
+              child: ListView.builder(
+                scrollDirection: Axis.horizontal,
+                shrinkWrap: true,
+                padding: const EdgeInsets.symmetric(horizontal: 24),
+                itemCount: _mirrors.length,
+                itemBuilder: (_, i) {
+                  final sel = i == _webMirrorIndex;
+                  return GestureDetector(
+                    onTap: () => _switchMirror(i),
+                    child: AnimatedContainer(
+                      duration: const Duration(milliseconds: 180),
+                      margin: const EdgeInsets.only(right: 8),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 12, vertical: 6),
+                      decoration: BoxDecoration(
+                        color: sel
+                            ? AppTheme.accent
+                            : Colors.white.withOpacity(0.08),
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(
+                            color: sel ? AppTheme.accent : Colors.white12),
+                      ),
+                      child: Text(_mirrors[i]['name']!,
+                          style: TextStyle(
+                            color: sel ? Colors.black : Colors.white60,
+                            fontSize: 11,
+                            fontWeight:
+                            sel ? FontWeight.bold : FontWeight.normal,
+                          )),
+                    ),
+                  );
+                },
+              ),
+            ),
+        ]),
+      ),
     );
   }
 
-  // ── Gesture Layer ─────────────────────────────────────────────────────────
+  // ── Gesture layer (native) ─────────────────────────────────────────────────
   Widget _buildGestureLayer() {
     return Row(children: [
-      Expanded(child: Listener(
-        behavior: HitTestBehavior.translucent,
-        onPointerDown: (_) {
-          if (!_isControlsVisible) _toggleControls();
-        },
-        child: GestureDetector(
+      Expanded(
+        child: Listener(
           behavior: HitTestBehavior.translucent,
-          onTap: _toggleControls,
-          onDoubleTap: () => _seekRelative(-10),
-          onVerticalDragUpdate: (d) => _handleVerticalDrag(d, true),
-          onVerticalDragEnd: (_) => _handleVerticalDragEnd(true),
+          onPointerDown: (_) {
+            if (!_isControlsVisible) _toggleControls();
+          },
+          child: GestureDetector(
+            behavior: HitTestBehavior.translucent,
+            onTap: _toggleControls,
+            onDoubleTap: () => _seekRelative(-10),
+            onVerticalDragUpdate: (d) => _handleVerticalDrag(d, true),
+            onVerticalDragEnd: (_) => _handleVerticalDragEnd(true),
+          ),
         ),
-      )),
-      Expanded(child: Listener(
-        behavior: HitTestBehavior.translucent,
-        onPointerDown: (_) {
-          if (!_isControlsVisible) _toggleControls();
-        },
-        child: GestureDetector(
+      ),
+      Expanded(
+        child: Listener(
           behavior: HitTestBehavior.translucent,
-          onTap: _toggleControls,
-          onDoubleTap: () => _seekRelative(10),
-          onVerticalDragUpdate: (d) => _handleVerticalDrag(d, false),
-          onVerticalDragEnd: (_) => _handleVerticalDragEnd(false),
+          onPointerDown: (_) {
+            if (!_isControlsVisible) _toggleControls();
+          },
+          child: GestureDetector(
+            behavior: HitTestBehavior.translucent,
+            onTap: _toggleControls,
+            onDoubleTap: () => _seekRelative(10),
+            onVerticalDragUpdate: (d) => _handleVerticalDrag(d, false),
+            onVerticalDragEnd: (_) => _handleVerticalDragEnd(false),
+          ),
         ),
-      )),
+      ),
     ]);
   }
 
-  // ── Resolving Overlay ─────────────────────────────────────────────────────
-  Widget _buildResolvingOverlay() {
-    return Container(color: Colors.black, child: Center(
-      child: Column(mainAxisSize: MainAxisSize.min, children: [
-        SizedBox(width: 56, height: 56,
-          child: CircularProgressIndicator(color: AppTheme.accent, strokeWidth: 2.5)),
-        const SizedBox(height: 20),
-        Text(_resolvingStatus,
-          style: const TextStyle(color: Colors.white70, fontSize: 13)),
-        const SizedBox(height: 8),
-        Text('Trying Consumet → VidSrc.xyz → Web Embed',
-          style: TextStyle(color: Colors.white38, fontSize: 11)),
-      ]),
-    ));
-  }
-
-  // ── Unavailable Overlay ───────────────────────────────────────────────────
-  Widget _buildUnavailableOverlay() {
-    return Container(
-      color: Colors.black.withValues(alpha: 0.95),
-      child: Center(child: Padding(
-        padding: const EdgeInsets.all(32),
-        child: Column(mainAxisSize: MainAxisSize.min, children: [
-          Container(
-            width: 72, height: 72,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              color: Colors.red.withValues(alpha: 0.12),
-              border: Border.all(color: Colors.redAccent.withValues(alpha: 0.5), width: 2),
-            ),
-            child: const Icon(Icons.movie_filter_outlined, color: Colors.redAccent, size: 36),
-          ),
-          const SizedBox(height: 20),
-          const Text('Not Available', style: TextStyle(
-            color: Colors.white, fontSize: 22, fontWeight: FontWeight.bold)),
-          const SizedBox(height: 10),
-          Text(
-            '"${widget.title}" is not indexed on any of our streaming sources right now.\n\nThis usually means the content is very new, very old, or region-specific.',
-            textAlign: TextAlign.center,
-            style: const TextStyle(color: Colors.white54, fontSize: 13, height: 1.5),
-          ),
-          const SizedBox(height: 28),
-          ElevatedButton.icon(
-            onPressed: _resolveAndPlay,
-            icon: const Icon(Icons.refresh_rounded, color: Colors.black),
-            label: const Text('Try Again', style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: AppTheme.accent,
-              padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 14),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-            ),
-          ),
-          const SizedBox(height: 12),
-          OutlinedButton.icon(
-            onPressed: () {
-              SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
-              SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
-              Navigator.pop(context);
-            },
-            icon: const Icon(Icons.arrow_back_rounded, color: Colors.white70),
-            label: const Text('Go Back', style: TextStyle(color: Colors.white70)),
-            style: OutlinedButton.styleFrom(
-              side: const BorderSide(color: Colors.white24),
-              padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 14),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-            ),
-          ),
-        ]),
-      )),
-    );
-  }
-
-  // ── Controls Overlay ──────────────────────────────────────────────────────
+  // ── Controls overlay ───────────────────────────────────────────────────────
   Widget _buildControlsOverlay() {
     final title = widget.mediaType == 'tv'
         ? '${widget.title}  •  S$_currentSeason E$_currentEpisode'
         : widget.title;
 
-    // ── WEB MODE: Slim top-strip only. Nothing else. ───────────────────────
     if (!_isNativeMode) {
       return Positioned(
         top: 0, left: 0, right: 0,
         child: Container(
           decoration: const BoxDecoration(
             gradient: LinearGradient(
-              colors: [Color(0xDD000000), Colors.transparent],
-              begin: Alignment.topCenter, end: Alignment.bottomCenter,
+              colors: [Color(0xEE000000), Colors.transparent],
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
             ),
           ),
           child: SafeArea(
             bottom: false,
             child: Column(mainAxisSize: MainAxisSize.min, children: [
-              // Row 1: Back + Title
-              Row(children: [
-                IconButton(
-                  icon: const Icon(Icons.arrow_back_ios_new, color: Colors.white, size: 20),
-                  onPressed: () {
-                    SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
-                    Navigator.pop(context);
-                  },
-                ),
-                Expanded(child: Text(title,
-                  style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w600),
-                  overflow: TextOverflow.ellipsis)),
-                IconButton(
-                  icon: const Icon(Icons.screen_rotation, color: Colors.white70, size: 20),
-                  onPressed: () {
-                    if (MediaQuery.of(context).orientation == Orientation.portrait) {
-                      SystemChrome.setPreferredOrientations([DeviceOrientation.landscapeLeft, DeviceOrientation.landscapeRight]);
-                    } else {
-                      SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
-                    }
-                    Future.delayed(const Duration(seconds: 3), () {
-                      SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp, DeviceOrientation.landscapeLeft, DeviceOrientation.landscapeRight]);
-                    });
-                  },
-                ),
-              ]),
-              // Row 2: Mirror pills scrollable
-              SizedBox(
-                height: 38,
-                child: ListView.builder(
-                  scrollDirection: Axis.horizontal,
-                  padding: const EdgeInsets.only(left: 12, right: 12, bottom: 6),
-                  itemCount: _mirrors.length,
-                  itemBuilder: (_, i) {
-                    final sel = i == _webMirrorIndex;
-                    final health = _mirrorHealth[i];
-                    final dot = health == null ? Colors.white38 : health ? Colors.greenAccent : Colors.redAccent;
-                    return GestureDetector(
-                      onTap: () => _switchWebMirror(i),
-                      child: AnimatedContainer(
-                        duration: const Duration(milliseconds: 200),
-                        margin: const EdgeInsets.only(right: 8),
-                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                        decoration: BoxDecoration(
-                          color: sel ? AppTheme.accent : Colors.black.withOpacity(0.7),
-                          borderRadius: BorderRadius.circular(20),
-                          border: Border.all(color: sel ? AppTheme.accent : Colors.white24),
-                        ),
-                        child: Row(mainAxisSize: MainAxisSize.min, children: [
-                          Container(width: 6, height: 6, decoration: BoxDecoration(color: dot, shape: BoxShape.circle)),
-                          const SizedBox(width: 5),
-                          Text(_mirrors[i]['name']!,
-                            style: TextStyle(color: sel ? Colors.black : Colors.white,
-                              fontSize: 11, fontWeight: sel ? FontWeight.bold : FontWeight.w500)),
-                        ]),
-                      ),
-                    );
-                  },
-                ),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 4),
+                child: Row(children: [
+                  IconButton(
+                    icon: const Icon(Icons.arrow_back_ios_new_rounded,
+                        color: Colors.white, size: 20),
+                    onPressed: () {
+                      SystemChrome.setPreferredOrientations(
+                          [DeviceOrientation.portraitUp]);
+                      Navigator.pop(context);
+                    },
+                  ),
+                  Expanded(
+                    child: Text(title,
+                        style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 14,
+                            fontWeight: FontWeight.w600),
+                        overflow: TextOverflow.ellipsis),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.screen_rotation_rounded,
+                        color: Colors.white70, size: 20),
+                    onPressed: _toggleOrientation,
+                  ),
+                  if (widget.mediaType == 'tv')
+                    IconButton(
+                      icon: const Icon(Icons.list_rounded,
+                          color: Colors.white70, size: 20),
+                      onPressed: _toggleEpisodePanel,
+                    ),
+                ]),
               ),
+              if (_mirrors.isNotEmpty)
+                SizedBox(
+                  height: 40,
+                  child: ListView.builder(
+                    scrollDirection: Axis.horizontal,
+                    padding: const EdgeInsets.only(
+                        left: 14, right: 14, bottom: 8),
+                    itemCount: _mirrors.length,
+                    itemBuilder: (_, i) => _buildMirrorPill(i),
+                  ),
+                ),
             ]),
           ),
         ),
       );
     }
 
-    // ── NATIVE MODE: Full overlay with gradient + all controls ─────────────
-    return Container(
-      decoration: const BoxDecoration(
-        gradient: LinearGradient(
-          colors: [Color(0xCC000000), Colors.transparent, Color(0xCC000000)],
-          begin: Alignment.topCenter, end: Alignment.bottomCenter,
-          stops: [0.0, 0.45, 1.0],
-        ),
-      ),
-      child: SafeArea(child: Stack(children: [
-        // Top bar
-        Positioned(top: 0, left: 0, right: 0,
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-            child: Row(children: [
-              IconButton(
-                icon: const Icon(Icons.arrow_back_ios_new, color: Colors.white, size: 22),
-                onPressed: () {
-                  SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
-                  Navigator.pop(context);
-                },
-              ),
-              const SizedBox(width: 4),
-              Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text(title,
-                  style: const TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.w600),
-                  overflow: TextOverflow.ellipsis),
-                if (_streamSource != null)
-                  Text('via $_streamSource',
-                    style: TextStyle(color: AppTheme.accent.withValues(alpha: 0.8), fontSize: 11)),
-              ])),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                decoration: BoxDecoration(
-                  color: AppTheme.accent.withValues(alpha: 0.2),
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: AppTheme.accent.withValues(alpha: 0.6))),
-                child: Text('🎬 Native',
-                  style: TextStyle(color: AppTheme.accent, fontSize: 11, fontWeight: FontWeight.bold)),
-              ),
-              const SizedBox(width: 4),
-              IconButton(
-                icon: const Icon(Icons.lock_open, color: Colors.white70, size: 20),
-                onPressed: () { setState(() => _isLocked = true); _controlsTimer?.cancel(); },
-              ),
-              IconButton(
-                icon: const Icon(Icons.screen_rotation, color: Colors.white70, size: 20),
-                onPressed: () {
-                  if (MediaQuery.of(context).orientation == Orientation.portrait) {
-                    SystemChrome.setPreferredOrientations([DeviceOrientation.landscapeLeft, DeviceOrientation.landscapeRight]);
-                  } else {
-                    SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
-                  }
-                  Future.delayed(const Duration(seconds: 3), () {
-                    SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp, DeviceOrientation.landscapeLeft, DeviceOrientation.landscapeRight]);
-                  });
-                },
-              ),
-              IconButton(
-                icon: const Icon(Icons.picture_in_picture_alt, color: Colors.white70, size: 20),
-                onPressed: () { try { SimplePip().enterPipMode(); } catch (_) {} },
-              ),
-            ]),
+    return SizedBox.expand(
+      child: Stack(children: [
+        Container(
+          decoration: const BoxDecoration(
+            gradient: LinearGradient(
+              colors: [
+                Color(0xCC000000),
+                Colors.transparent,
+                Color(0xCC000000),
+              ],
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+              stops: [0.0, 0.45, 1.0],
+            ),
           ),
         ),
+        SafeArea(
+          child: Stack(children: [
 
-        // Center play/pause
-        Center(child: GestureDetector(
-          onTap: _togglePlayPause,
-          child: Container(
-            width: 64, height: 64,
-            decoration: BoxDecoration(
-              color: Colors.black54, shape: BoxShape.circle,
-              border: Border.all(color: AppTheme.accent.withValues(alpha: 0.6), width: 2)),
-            child: const Icon(Icons.play_arrow, color: Colors.white, size: 36),
-          ),
-        )),
-
-        // Bottom bar (Native only — full controls)
-        Positioned(bottom: 0, left: 0, right: 0,
-          child: Padding(
-            padding: const EdgeInsets.all(12),
-            child: Column(mainAxisSize: MainAxisSize.min, children: [
-              // Progress bar
-              StreamBuilder(
-                stream: _player.stream.position,
-                builder: (_, snapshot) {
-                  final pos = snapshot.data ?? Duration.zero;
-                  final dur = _player.state.duration;
-                  final progress = dur.inMilliseconds > 0 ? pos.inMilliseconds / dur.inMilliseconds : 0.0;
-                  return Column(children: [
-                    SliderTheme(
-                      data: SliderTheme.of(context).copyWith(
-                        trackHeight: 3,
-                        thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6),
-                        overlayShape: const RoundSliderOverlayShape(overlayRadius: 12),
-                        activeTrackColor: AppTheme.accent,
-                        inactiveTrackColor: Colors.white24,
-                        thumbColor: Colors.white,
-                      ),
-                      child: Slider(
-                        value: progress.clamp(0.0, 1.0),
-                        onChanged: (v) {
-                          final target = Duration(milliseconds: (v * dur.inMilliseconds).round());
-                          _player.seek(target);
-                        },
-                      ),
-                    ),
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 16),
-                      child: Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-                        Text(_formatDuration(pos), style: const TextStyle(color: Colors.white60, fontSize: 11)),
-                        Text(_formatDuration(dur), style: const TextStyle(color: Colors.white60, fontSize: 11)),
-                      ]),
-                    ),
-                  ]);
-                },
-              ),
-              const SizedBox(height: 4),
-              // Seek + Episodes row
-              Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-                _circleButton(Icons.replay_10, () => _seekRelative(-10)),
-                if (widget.mediaType == 'tv')
-                  GestureDetector(
-                    onTap: _toggleEpisodePanel,
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                      decoration: BoxDecoration(
-                        color: Colors.white12, borderRadius: BorderRadius.circular(20),
-                        border: Border.all(color: Colors.white24)),
-                      child: const Row(children: [
-                        Icon(Icons.list, color: Colors.white, size: 18),
-                        SizedBox(width: 6),
-                        Text('Episodes', style: TextStyle(color: Colors.white, fontSize: 13)),
-                      ]),
+            Positioned(
+              top: 0, left: 0, right: 0,
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(4, 4, 4, 0),
+                child: Row(children: [
+                  IconButton(
+                    icon: const Icon(Icons.arrow_back_ios_new_rounded,
+                        color: Colors.white, size: 20),
+                    onPressed: () {
+                      SystemChrome.setPreferredOrientations(
+                          [DeviceOrientation.portraitUp]);
+                      Navigator.pop(context);
+                    },
+                  ),
+                  const SizedBox(width: 2),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(title,
+                            style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 14,
+                                fontWeight: FontWeight.w600),
+                            overflow: TextOverflow.ellipsis),
+                        if (_streamSource != null)
+                          Text('via $_streamSource',
+                              style: TextStyle(
+                                  color: AppTheme.accent.withOpacity(0.8),
+                                  fontSize: 10)),
+                      ],
                     ),
                   ),
-                _circleButton(Icons.forward_10, () => _seekRelative(10)),
-              ]),
-            ]),
-          ),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 9, vertical: 3),
+                    decoration: BoxDecoration(
+                      color: AppTheme.accent.withOpacity(0.18),
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(
+                          color: AppTheme.accent.withOpacity(0.55)),
+                    ),
+                    child: Text('🎬 Native',
+                        style: TextStyle(
+                            color: AppTheme.accent,
+                            fontSize: 10,
+                            fontWeight: FontWeight.bold)),
+                  ),
+                  const SizedBox(width: 4),
+                  IconButton(
+                    icon: const Icon(Icons.lock_open_rounded,
+                        color: Colors.white70, size: 20),
+                    onPressed: () {
+                      setState(() => _isLocked = true);
+                      _controlsTimer?.cancel();
+                    },
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.screen_rotation_rounded,
+                        color: Colors.white70, size: 20),
+                    onPressed: _toggleOrientation,
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.picture_in_picture_alt,
+                        color: Colors.white70, size: 20),
+                    onPressed: () async {
+                      try {
+                        await SimplePip().enterPipMode();
+                      } catch (_) {
+                        if (mounted) {
+                          ScaffoldMessenger.of(context)
+                              .showSnackBar(const SnackBar(
+                            content: Text(
+                                'PiP not supported on this device'),
+                            duration: Duration(seconds: 2),
+                            behavior: SnackBarBehavior.floating,
+                          ));
+                        }
+                      }
+                    },
+                  ),
+                ]),
+              ),
+            ),
+
+            Center(
+              child: GestureDetector(
+                onTap: _togglePlayPause,
+                child: StreamBuilder<bool>(
+                  stream: _player.stream.playing,
+                  initialData: false,
+                  builder: (_, snap) {
+                    final playing = snap.data ?? false;
+                    return AnimatedContainer(
+                      duration: const Duration(milliseconds: 150),
+                      width: 64, height: 64,
+                      decoration: BoxDecoration(
+                        color: Colors.black54,
+                        shape: BoxShape.circle,
+                        border: Border.all(
+                            color: AppTheme.accent.withOpacity(0.6),
+                            width: 2),
+                      ),
+                      child: Icon(
+                          playing
+                              ? Icons.pause_rounded
+                              : Icons.play_arrow_rounded,
+                          color: Colors.white,
+                          size: 36),
+                    );
+                  },
+                ),
+              ),
+            ),
+
+            Positioned(
+              bottom: 0, left: 0, right: 0,
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                child: Column(mainAxisSize: MainAxisSize.min, children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      _circleButton(Icons.replay_10_rounded,
+                              () => _seekRelative(-10)),
+                      if (widget.mediaType == 'tv') ...[
+                        const SizedBox(width: 16),
+                        _episodesButton(),
+                        const SizedBox(width: 16),
+                      ] else
+                        const SizedBox(width: 32),
+                      _circleButton(Icons.forward_10_rounded,
+                              () => _seekRelative(10)),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  StreamBuilder<Duration>(
+                    stream: _player.stream.position,
+                    builder: (_, snapshot) {
+                      final pos = snapshot.data ?? Duration.zero;
+                      final dur = _player.state.duration;
+                      final progress = dur.inMilliseconds > 0
+                          ? (pos.inMilliseconds / dur.inMilliseconds)
+                          .clamp(0.0, 1.0)
+                          : 0.0;
+                      return Column(children: [
+                        SliderTheme(
+                          data: SliderTheme.of(context).copyWith(
+                            trackHeight: 3,
+                            thumbShape: const RoundSliderThumbShape(
+                                enabledThumbRadius: 6),
+                            overlayShape: const RoundSliderOverlayShape(
+                                overlayRadius: 12),
+                            activeTrackColor: AppTheme.accent,
+                            inactiveTrackColor: Colors.white24,
+                            thumbColor: Colors.white,
+                          ),
+                          child: Slider(
+                            value: progress,
+                            onChanged: (v) {
+                              _player.seek(Duration(
+                                  milliseconds:
+                                  (v * dur.inMilliseconds).round()));
+                            },
+                          ),
+                        ),
+                        Padding(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 16),
+                          child: Row(
+                            mainAxisAlignment:
+                            MainAxisAlignment.spaceBetween,
+                            children: [
+                              Text(_fmt(pos),
+                                  style: const TextStyle(
+                                      color: Colors.white60,
+                                      fontSize: 11)),
+                              Text(_fmt(dur),
+                                  style: const TextStyle(
+                                      color: Colors.white60,
+                                      fontSize: 11)),
+                            ],
+                          ),
+                        ),
+                      ]);
+                    },
+                  ),
+                ]),
+              ),
+            ),
+          ]),
         ),
-      ])),
+      ]),
+    );
+  }
+
+  // ── Mirror pill ────────────────────────────────────────────────────────────
+  Widget _buildMirrorPill(int i) {
+    final sel    = i == _webMirrorIndex;
+    final health = _mirrorHealth[i];
+    final dot = health == null
+        ? Colors.white38
+        : health
+        ? Colors.greenAccent
+        : Colors.redAccent;
+
+    return GestureDetector(
+      onTap: () => _switchMirror(i),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 180),
+        margin: const EdgeInsets.only(right: 8),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+        decoration: BoxDecoration(
+          color: sel ? AppTheme.accent : Colors.black.withOpacity(0.65),
+          borderRadius: BorderRadius.circular(20),
+          border:
+          Border.all(color: sel ? AppTheme.accent : Colors.white24),
+        ),
+        child: Row(mainAxisSize: MainAxisSize.min, children: [
+          Container(
+              width: 6, height: 6,
+              decoration:
+              BoxDecoration(color: dot, shape: BoxShape.circle)),
+          const SizedBox(width: 5),
+          Text(_mirrors[i]['name']!,
+              style: TextStyle(
+                color: sel ? Colors.black : Colors.white,
+                fontSize: 11,
+                fontWeight: sel ? FontWeight.bold : FontWeight.w500,
+              )),
+        ]),
+      ),
+    );
+  }
+
+  Widget _episodesButton() {
+    return GestureDetector(
+      onTap: _toggleEpisodePanel,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+        decoration: BoxDecoration(
+          color: Colors.white12,
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: Colors.white24),
+        ),
+        child: const Row(children: [
+          Icon(Icons.video_library_rounded,
+              color: Colors.white, size: 17),
+          SizedBox(width: 6),
+          Text('Episodes',
+              style: TextStyle(color: Colors.white, fontSize: 13)),
+        ]),
+      ),
+    );
+  }
+
+  Widget _floatingPill({
+    required VoidCallback onTap,
+    required Color color,
+    required Color borderColor,
+    required Widget child,
+  }) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 8),
+        decoration: BoxDecoration(
+          color: color,
+          borderRadius: BorderRadius.circular(22),
+          border: Border.all(color: borderColor),
+          boxShadow: [
+            BoxShadow(
+                color: Colors.black.withOpacity(0.3),
+                blurRadius: 8,
+                offset: const Offset(0, 2))
+          ],
+        ),
+        child: child,
+      ),
     );
   }
 
@@ -1034,127 +1531,196 @@ class _NativeStreamPlayerScreenState extends State<NativeStreamPlayerScreen>
     return GestureDetector(
       onTap: onTap,
       child: Container(
-        width: 46, height: 46,
+        width: 50, height: 50,
         decoration: BoxDecoration(
-          color: Colors.black54, shape: BoxShape.circle,
-          border: Border.all(color: Colors.white24)),
-        child: Icon(icon, color: Colors.white, size: 22),
+          color: Colors.black.withOpacity(0.5),
+          shape: BoxShape.circle,
+          border: Border.all(color: Colors.white24),
+        ),
+        child: Icon(icon, color: Colors.white, size: 24),
       ),
     );
   }
 
-  Widget _buildSliderIndicator(IconData icon, double value, Color color) {
+  Widget _buildSliderIndicator(
+      IconData icon, double value, Color color) {
     return Container(
-      width: 50,
+      width: 52,
       padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 8),
       decoration: BoxDecoration(
-        color: Colors.black.withValues(alpha: 0.7),
-        borderRadius: BorderRadius.circular(30)),
+        color: Colors.black.withOpacity(0.72),
+        borderRadius: BorderRadius.circular(30),
+      ),
       child: Column(mainAxisSize: MainAxisSize.min, children: [
         Icon(icon, color: color, size: 20),
-        const SizedBox(height: 8),
-        RotatedBox(quarterTurns: -1,
+        const SizedBox(height: 10),
+        RotatedBox(
+          quarterTurns: -1,
           child: LinearProgressIndicator(
-            value: value, color: color, backgroundColor: Colors.white24, minHeight: 4,
-            borderRadius: BorderRadius.circular(2))),
-        const SizedBox(height: 4),
-        Text('${(value * 100).round()}%', style: TextStyle(color: color, fontSize: 10)),
+            value: value,
+            color: color,
+            backgroundColor: Colors.white24,
+            minHeight: 4,
+            borderRadius: BorderRadius.circular(2),
+          ),
+        ),
+        const SizedBox(height: 6),
+        Text('${(value * 100).round()}%',
+            style: TextStyle(color: color, fontSize: 10)),
       ]),
     );
   }
 
   Widget _buildLockIndicator() {
-    return Positioned(top: 16, left: 16,
+    return Positioned(
+      top: 20, left: 20,
       child: GestureDetector(
         onTap: () => setState(() => _isLocked = false),
         child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+          padding: const EdgeInsets.symmetric(
+              horizontal: 14, vertical: 9),
           decoration: BoxDecoration(
-            color: Colors.black87, borderRadius: BorderRadius.circular(20),
-            border: Border.all(color: AppTheme.accent.withValues(alpha: 0.5))),
+            color: Colors.black.withOpacity(0.85),
+            borderRadius: BorderRadius.circular(22),
+            border: Border.all(
+                color: AppTheme.accent.withOpacity(0.5)),
+          ),
           child: Row(children: [
-            Icon(Icons.lock, color: AppTheme.accent, size: 16),
-            const SizedBox(width: 6),
-            const Text('Tap to Unlock', style: TextStyle(color: Colors.white, fontSize: 12)),
+            Icon(Icons.lock_rounded,
+                color: AppTheme.accent, size: 15),
+            const SizedBox(width: 7),
+            const Text('Tap to unlock',
+                style:
+                TextStyle(color: Colors.white, fontSize: 12)),
           ]),
         ),
       ),
     );
   }
 
-  // ── Episode Panel ─────────────────────────────────────────────────────────
+  // ── Episode panel ──────────────────────────────────────────────────────────
   Widget _buildEpisodePanel() {
-    final seasonCount = widget.seasons.length;
     return Container(
-      height: 250,
-      width: double.infinity,
+      height: 260, width: double.infinity,
       decoration: BoxDecoration(
-        color: const Color(0xEE0D0D1A),
-        borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
-        border: Border.all(color: AppTheme.accent.withValues(alpha: 0.3)),
+        color: const Color(0xF00D0D1A),
+        borderRadius:
+        const BorderRadius.vertical(top: Radius.circular(22)),
+        border: Border.all(color: AppTheme.accent.withOpacity(0.3)),
+        boxShadow: [
+          BoxShadow(
+              color: Colors.black.withOpacity(0.6),
+              blurRadius: 20,
+              offset: const Offset(0, -4))
+        ],
       ),
       child: Column(children: [
-        Container(margin: const EdgeInsets.symmetric(vertical: 8),
-          width: 40, height: 4,
-          decoration: BoxDecoration(color: Colors.white30, borderRadius: BorderRadius.circular(2))),
-        if (seasonCount > 1)
-          SizedBox(height: 40,
+        Container(
+          margin: const EdgeInsets.symmetric(vertical: 10),
+          width: 36, height: 4,
+          decoration: BoxDecoration(
+              color: Colors.white24,
+              borderRadius: BorderRadius.circular(2)),
+        ),
+        if (widget.seasons.length > 1)
+          SizedBox(
+            height: 42,
             child: ListView.builder(
               scrollDirection: Axis.horizontal,
-              padding: const EdgeInsets.symmetric(horizontal: 12),
-              itemCount: seasonCount,
+              padding: const EdgeInsets.symmetric(horizontal: 14),
+              itemCount: widget.seasons.length,
               itemBuilder: (_, i) {
-                final sn = widget.seasons[i]['season_number'] as int? ?? i + 1;
+                final sn =
+                    (widget.seasons[i]['season_number'] as int?) ?? i + 1;
                 final sel = sn == _currentSeason;
                 return GestureDetector(
                   onTap: () => _switchSeason(sn),
                   child: AnimatedContainer(
-                    duration: const Duration(milliseconds: 200),
+                    duration: const Duration(milliseconds: 180),
                     margin: const EdgeInsets.only(right: 8),
-                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 16, vertical: 8),
                     decoration: BoxDecoration(
                       color: sel ? AppTheme.accent : Colors.white10,
-                      borderRadius: BorderRadius.circular(16)),
+                      borderRadius: BorderRadius.circular(16),
+                    ),
                     child: Text('Season $sn',
-                      style: TextStyle(
-                        color: sel ? Colors.black : Colors.white70,
-                        fontSize: 13, fontWeight: FontWeight.w600)),
+                        style: TextStyle(
+                          color: sel ? Colors.black : Colors.white70,
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                        )),
                   ),
                 );
               },
             ),
           ),
+        const SizedBox(height: 10),
+        Expanded(
+          child: GridView.builder(
+            padding: const EdgeInsets.symmetric(horizontal: 14),
+            scrollDirection: Axis.horizontal,
+            gridDelegate:
+            const SliverGridDelegateWithFixedCrossAxisCount(
+              crossAxisCount: 2,
+              mainAxisSpacing: 8, crossAxisSpacing: 8,
+              childAspectRatio: 0.55,
+            ),
+            itemCount: _episodeCount,
+            itemBuilder: (_, i) {
+              final ep  = i + 1;
+              final sel = ep == _currentEpisode;
+              return GestureDetector(
+                onTap: () => _switchEpisode(ep),
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 180),
+                  decoration: BoxDecoration(
+                    color: sel ? AppTheme.accent : Colors.white10,
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(
+                        color: sel ? AppTheme.accent : Colors.white12),
+                  ),
+                  child: Center(
+                    child: Text('E$ep',
+                        style: TextStyle(
+                          color: sel ? Colors.black : Colors.white70,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 13,
+                        )),
+                  ),
+                ),
+              );
+            },
+          ),
+        ),
         const SizedBox(height: 8),
-        Expanded(child: GridView.builder(
-          padding: const EdgeInsets.symmetric(horizontal: 12),
-          scrollDirection: Axis.horizontal,
-          gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-            crossAxisCount: 2, mainAxisSpacing: 8, crossAxisSpacing: 8, childAspectRatio: 0.6),
-          itemCount: _episodeCount,
-          itemBuilder: (_, i) {
-            final ep = i + 1;
-            final sel = ep == _currentEpisode;
-            return GestureDetector(
-              onTap: () => _switchEpisode(ep),
-              child: AnimatedContainer(
-                duration: const Duration(milliseconds: 200),
-                decoration: BoxDecoration(
-                  color: sel ? AppTheme.accent : Colors.white10,
-                  borderRadius: BorderRadius.circular(10),
-                  border: Border.all(color: sel ? AppTheme.accent : Colors.white12)),
-                child: Center(child: Text('E$ep',
-                  style: TextStyle(
-                    color: sel ? Colors.black : Colors.white70,
-                    fontWeight: FontWeight.bold, fontSize: 13))),
-              ),
-            );
-          },
-        )),
       ]),
     );
   }
 
-  String _formatDuration(Duration d) {
+  // ── Helpers ────────────────────────────────────────────────────────────────
+  void _toggleOrientation() {
+    if (MediaQuery.of(context).orientation == Orientation.portrait) {
+      SystemChrome.setPreferredOrientations([
+        DeviceOrientation.landscapeLeft,
+        DeviceOrientation.landscapeRight,
+      ]);
+    } else {
+      SystemChrome.setPreferredOrientations(
+          [DeviceOrientation.portraitUp]);
+    }
+    Future.delayed(const Duration(seconds: 3), () {
+      if (mounted) {
+        SystemChrome.setPreferredOrientations([
+          DeviceOrientation.portraitUp,
+          DeviceOrientation.landscapeLeft,
+          DeviceOrientation.landscapeRight,
+        ]);
+      }
+    });
+  }
+
+  String _fmt(Duration d) {
     final h = d.inHours;
     final m = d.inMinutes.remainder(60).toString().padLeft(2, '0');
     final s = d.inSeconds.remainder(60).toString().padLeft(2, '0');

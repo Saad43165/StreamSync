@@ -13,8 +13,8 @@ dependencies:
   provider: ^6.1.5+1
   shared_preferences: ^2.5.5
   url_launcher: ^6.3.2
-  youtube_player_flutter: ^8.1.2
-  flutter_inappwebview: ^5.8.0
+  youtube_player_flutter: 10.0.1
+  flutter_inappwebview: ^6.1.0
   google_fonts: ^6.2.1
   flutter_animate: ^4.5.0
   cached_network_image: ^3.3.1
@@ -28,6 +28,9 @@ dependencies:
   media_kit_video: ^2.0.1
   media_kit_libs_video: ^1.0.7
   simple_pip_mode: ^1.1.0
+  flutter_downloader: ^1.11.8
+  permission_handler: ^11.3.1
+  open_filex: ^4.3.2  # optional, for opening file manager
 
 dev_dependencies:
   flutter_test:

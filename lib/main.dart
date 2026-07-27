@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import 'theme/app_theme.dart';
 
 import 'package:hive_flutter/hive_flutter.dart';
+import 'package:flutter_downloader/flutter_downloader.dart';
 import 'services/tmdb_service.dart';
 import 'services/database_service.dart';
 import 'services/download_service.dart';
@@ -19,6 +20,7 @@ import 'package:media_kit/media_kit.dart';
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   MediaKit.ensureInitialized();
+  await FlutterDownloader.initialize(debug: false, ignoreSsl: false);
   await Hive.initFlutter();
   await Hive.openBox('tmdb_cache_box');
   runApp(
@@ -44,7 +46,13 @@ class StreamSyncApp extends StatelessWidget {
     return MaterialApp(
       title: 'StreamSync',
       theme: AppTheme.darkTheme,
+      color: AppTheme.background, // Prevents white flash on app resume
       debugShowCheckedModeBanner: false,
+      // Dark background shown during page transitions — eliminates white flash
+      builder: (context, child) => Container(
+        color: AppTheme.background,
+        child: child!,
+      ),
       home: Container(
         decoration: const BoxDecoration(
           gradient: AppTheme.backgroundGradient,
@@ -84,7 +92,7 @@ class _MainNavigationShellState extends State<MainNavigationShell> {
             index: _currentIndex,
             children: _screens,
           ),
-          
+
           // Floating Glassmorphic Bottom Navigation Dock
           Align(
             alignment: Alignment.bottomCenter,
@@ -153,7 +161,7 @@ class _MainNavigationShellState extends State<MainNavigationShell> {
               ),
             ),
           ),
-          
+
           // Floating background download manager
           const FloatingDownloadWidget(),
         ],

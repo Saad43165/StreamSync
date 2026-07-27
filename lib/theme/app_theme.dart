@@ -45,7 +45,7 @@ class AppTheme {
   static ThemeData get darkTheme {
     final baseTheme = ThemeData.dark();
     return baseTheme.copyWith(
-      scaffoldBackgroundColor: Colors.transparent, // transparent to show ambient gradient
+      scaffoldBackgroundColor: background, // dark — prevents white flash on nav
       colorScheme: const ColorScheme.dark(
         primary: accent,
         secondary: secondaryAccent,

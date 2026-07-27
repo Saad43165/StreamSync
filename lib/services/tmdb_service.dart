@@ -30,7 +30,6 @@ class TMDBService extends ChangeNotifier {
   List<dynamic> _disney = [];
   List<dynamic> get disney => _disney;
 
-  // New genre-specific sections
   List<dynamic> _actionMovies = [];
   List<dynamic> get actionMovies => _actionMovies;
 
@@ -57,6 +56,54 @@ class TMDBService extends ChangeNotifier {
 
   bool get hasApiKey => AppConfig.tmdbApiKey.isNotEmpty;
 
+  // ── Dedicated Upcoming Releases state (paginated, real API only) ─────────
+  // Kept separate from `_upcoming` above (which is just a page-1 snapshot
+  // used for the home feed) so the Upcoming Releases screen can page through
+  // real TMDB results independently without disturbing the home feed cache.
+  final List<dynamic> _upcomingMoviesFeed = [];
+  List<dynamic> get upcomingMoviesFeed => _upcomingMoviesFeed;
+  int _upcomingMoviesPage = 0;
+  int _upcomingMoviesTotalPages = 1;
+  bool _isLoadingUpcomingMovies = false;
+  bool get isLoadingUpcomingMovies => _isLoadingUpcomingMovies;
+  bool get hasMoreUpcomingMovies => _upcomingMoviesPage < _upcomingMoviesTotalPages;
+  bool _upcomingMoviesErrored = false;
+  bool get upcomingMoviesErrored => _upcomingMoviesErrored;
+
+  final List<dynamic> _upcomingTvFeed = [];
+  List<dynamic> get upcomingTvFeed => _upcomingTvFeed;
+  int _upcomingTvPage = 0;
+  int _upcomingTvTotalPages = 1;
+  bool _isLoadingUpcomingTv = false;
+  bool get isLoadingUpcomingTv => _isLoadingUpcomingTv;
+  bool get hasMoreUpcomingTv => _upcomingTvPage < _upcomingTvTotalPages;
+  bool _upcomingTvErrored = false;
+  bool get upcomingTvErrored => _upcomingTvErrored;
+
+  // Human-readable genre names for chips (discover/upcoming endpoints only
+  // return genre_ids, not names) — movie and tv ids diverge for a few genres.
+  static const Map<int, String> _movieGenreNames = {
+    28: 'Action', 12: 'Adventure', 16: 'Animation', 35: 'Comedy',
+    80: 'Crime', 99: 'Documentary', 18: 'Drama', 10751: 'Family',
+    14: 'Fantasy', 36: 'History', 27: 'Horror', 10402: 'Music',
+    9648: 'Mystery', 10749: 'Romance', 878: 'Sci-Fi', 10770: 'TV Movie',
+    53: 'Thriller', 10752: 'War', 37: 'Western',
+  };
+  static const Map<int, String> _tvGenreNames = {
+    10759: 'Action & Adventure', 16: 'Animation', 35: 'Comedy', 80: 'Crime',
+    99: 'Documentary', 18: 'Drama', 10751: 'Family', 10762: 'Kids',
+    9648: 'Mystery', 10763: 'News', 10764: 'Reality',
+    10765: 'Sci-Fi & Fantasy', 10766: 'Soap', 10767: 'Talk',
+    10768: 'War & Politics', 37: 'Western',
+  };
+
+  static List<String> genreNamesFor(Map<String, dynamic> item) {
+    final isTv = item['media_type'] == 'tv';
+    final ids = (item['genre_ids'] as List<dynamic>? ?? []).cast<int>();
+    final map = isTv ? _tvGenreNames : _movieGenreNames;
+    return ids.map((id) => map[id]).whereType<String>().toList();
+  }
+
   void _setLoading(bool value) {
     _isLoading = value;
     notifyListeners();
@@ -81,7 +128,6 @@ class TMDBService extends ChangeNotifier {
       return;
     }
 
-    // 1. Try loading cached category mappings from Hive for immediate layout rendering
     try {
       final cacheBox = Hive.box('tmdb_cache_box');
       final cachedStr = cacheBox.get('categories_cache') as String?;
@@ -108,7 +154,6 @@ class TMDBService extends ChangeNotifier {
 
     _setLoading(true);
     try {
-      // 2. Fetch all components in parallel to drastically improve network performance
       final responses = await Future.wait([
         http.get(Uri.parse('$_baseUrl/trending/all/day?api_key=${AppConfig.tmdbApiKey}')).timeout(const Duration(seconds: 15)),
         http.get(Uri.parse('$_baseUrl/discover/movie?api_key=${AppConfig.tmdbApiKey}&sort_by=popularity.desc')).timeout(const Duration(seconds: 15)),
@@ -125,17 +170,15 @@ class TMDBService extends ChangeNotifier {
         http.get(Uri.parse('$_baseUrl/discover/tv?api_key=${AppConfig.tmdbApiKey}&with_original_language=ur&sort_by=popularity.desc')).timeout(const Duration(seconds: 15)),
       ]);
 
-      // 3. Process trending
       final trendingRes = responses[0];
       if (trendingRes.statusCode == 200) {
         final data = json.decode(trendingRes.body);
         final results = data['results'] as List<dynamic>? ?? [];
-        _trending = results.where((item) => 
-          item['media_type'] == 'movie' || item['media_type'] == 'tv'
+        _trending = results.where((item) =>
+        item['media_type'] == 'movie' || item['media_type'] == 'tv'
         ).toList();
       }
 
-      // 4. Process movies
       final moviesRes = responses[1];
       if (moviesRes.statusCode == 200) {
         final data = json.decode(moviesRes.body);
@@ -145,7 +188,6 @@ class TMDBService extends ChangeNotifier {
         }).toList();
       }
 
-      // 5. Process series
       final seriesRes = responses[2];
       if (seriesRes.statusCode == 200) {
         final data = json.decode(seriesRes.body);
@@ -155,7 +197,6 @@ class TMDBService extends ChangeNotifier {
         }).toList();
       }
 
-      // 6. Process Netflix
       final netflixRes = responses[3];
       if (netflixRes.statusCode == 200) {
         final data = json.decode(netflixRes.body);
@@ -165,7 +206,6 @@ class TMDBService extends ChangeNotifier {
         }).toList();
       }
 
-      // 7. Process Prime
       final primeRes = responses[4];
       if (primeRes.statusCode == 200) {
         final data = json.decode(primeRes.body);
@@ -175,7 +215,6 @@ class TMDBService extends ChangeNotifier {
         }).toList();
       }
 
-      // 8. Process Disney
       final disneyRes = responses[5];
       if (disneyRes.statusCode == 200) {
         final data = json.decode(disneyRes.body);
@@ -185,7 +224,6 @@ class TMDBService extends ChangeNotifier {
         }).toList();
       }
 
-      // 9. Process Action
       final actionRes = responses[6];
       if (actionRes.statusCode == 200) {
         final data = json.decode(actionRes.body);
@@ -195,7 +233,6 @@ class TMDBService extends ChangeNotifier {
         }).toList();
       }
 
-      // 10. Process Comedy
       final comedyRes = responses[7];
       if (comedyRes.statusCode == 200) {
         final data = json.decode(comedyRes.body);
@@ -205,7 +242,6 @@ class TMDBService extends ChangeNotifier {
         }).toList();
       }
 
-      // 11. Process SciFi
       final scifiRes = responses[8];
       if (scifiRes.statusCode == 200) {
         final data = json.decode(scifiRes.body);
@@ -215,7 +251,6 @@ class TMDBService extends ChangeNotifier {
         }).toList();
       }
 
-      // 12. Process Horror
       final horrorRes = responses[9];
       if (horrorRes.statusCode == 200) {
         final data = json.decode(horrorRes.body);
@@ -225,7 +260,6 @@ class TMDBService extends ChangeNotifier {
         }).toList();
       }
 
-      // 13. Process Upcoming (Filter for real future releases strictly)
       final upcomingRes = responses[10];
       if (upcomingRes.statusCode == 200) {
         final data = json.decode(upcomingRes.body);
@@ -246,7 +280,6 @@ class TMDBService extends ChangeNotifier {
         }
       }
 
-      // 14. Process Bollywood
       final bollywoodRes = responses[11];
       if (bollywoodRes.statusCode == 200) {
         final data = json.decode(bollywoodRes.body);
@@ -256,7 +289,6 @@ class TMDBService extends ChangeNotifier {
         }).toList();
       }
 
-      // 15. Process Pakistani
       final pakistaniRes = responses[12];
       if (pakistaniRes.statusCode == 200) {
         final data = json.decode(pakistaniRes.body);
@@ -266,7 +298,6 @@ class TMDBService extends ChangeNotifier {
         }).toList();
       }
 
-      // 16. Save combined category models state mapping in Hive
       final cacheBox = Hive.box('tmdb_cache_box');
       final payload = {
         'trending': _trending,
@@ -319,6 +350,138 @@ class TMDBService extends ChangeNotifier {
     }
   }
 
+  // ── Real, paginated Upcoming Movies ───────────────────────────────────────
+  // Uses TMDB's official /movie/upcoming endpoint, strictly filtered to
+  // future release dates, sorted ascending (soonest first). Supports
+  // infinite scroll via `loadMore`.
+  Future<void> fetchUpcomingMovies({bool loadMore = false}) async {
+    if (_isLoadingUpcomingMovies) return;
+    if (loadMore && !hasMoreUpcomingMovies) return;
+
+    if (!loadMore) {
+      _upcomingMoviesPage = 0;
+      _upcomingMoviesTotalPages = 1;
+      _upcomingMoviesFeed.clear();
+      _upcomingMoviesErrored = false;
+    }
+
+    if (!hasApiKey) {
+      _upcomingMoviesFeed
+        ..clear()
+        ..addAll(_getMockUpcoming());
+      _upcomingMoviesPage = 1;
+      _upcomingMoviesTotalPages = 1;
+      notifyListeners();
+      return;
+    }
+
+    _isLoadingUpcomingMovies = true;
+    notifyListeners();
+
+    final nextPage = _upcomingMoviesPage + 1;
+    try {
+      final res = await http
+          .get(Uri.parse(
+          '$_baseUrl/movie/upcoming?api_key=${AppConfig.tmdbApiKey}&page=$nextPage'))
+          .timeout(const Duration(seconds: 15));
+
+      if (res.statusCode == 200) {
+        final data = json.decode(res.body);
+        final results = (data['results'] as List<dynamic>? ?? []);
+        final nowStr = DateTime.now().toIso8601String().split('T').first;
+
+        final futureOnly = results.where((item) {
+          final relDate = item['release_date'] as String? ?? '';
+          return relDate.isNotEmpty && relDate.compareTo(nowStr) >= 0;
+        }).map((item) {
+          item['media_type'] = 'movie';
+          return item;
+        }).toList();
+
+        _upcomingMoviesFeed.addAll(futureOnly);
+        _upcomingMoviesFeed.sort((a, b) =>
+            (a['release_date'] as String? ?? '').compareTo(b['release_date'] as String? ?? ''));
+
+        _upcomingMoviesPage = nextPage;
+        _upcomingMoviesTotalPages = data['total_pages'] as int? ?? nextPage;
+        _upcomingMoviesErrored = false;
+      } else {
+        _upcomingMoviesErrored = true;
+      }
+    } catch (e) {
+      debugPrint('Error fetching upcoming movies: $e');
+      _upcomingMoviesErrored = true;
+    } finally {
+      _isLoadingUpcomingMovies = false;
+      notifyListeners();
+    }
+  }
+
+  // ── Real, paginated Upcoming TV ───────────────────────────────────────────
+  // TMDB has no dedicated "upcoming tv" endpoint, so this uses
+  // /discover/tv with first_air_date.gte=today, sorted by soonest first —
+  // the standard, documented way to surface not-yet-aired series.
+  Future<void> fetchUpcomingTv({bool loadMore = false}) async {
+    if (_isLoadingUpcomingTv) return;
+    if (loadMore && !hasMoreUpcomingTv) return;
+
+    if (!loadMore) {
+      _upcomingTvPage = 0;
+      _upcomingTvTotalPages = 1;
+      _upcomingTvFeed.clear();
+      _upcomingTvErrored = false;
+    }
+
+    if (!hasApiKey) {
+      _upcomingTvFeed
+        ..clear()
+        ..addAll(_getMockUpcomingTv());
+      _upcomingTvPage = 1;
+      _upcomingTvTotalPages = 1;
+      notifyListeners();
+      return;
+    }
+
+    _isLoadingUpcomingTv = true;
+    notifyListeners();
+
+    final nextPage = _upcomingTvPage + 1;
+    final todayStr = DateTime.now().toIso8601String().split('T').first;
+    try {
+      final res = await http
+          .get(Uri.parse(
+          '$_baseUrl/discover/tv?api_key=${AppConfig.tmdbApiKey}'
+              '&first_air_date.gte=$todayStr'
+              '&sort_by=first_air_date.asc'
+              '&page=$nextPage'))
+          .timeout(const Duration(seconds: 15));
+
+      if (res.statusCode == 200) {
+        final data = json.decode(res.body);
+        final results = (data['results'] as List<dynamic>? ?? []).map((item) {
+          item['media_type'] = 'tv';
+          return item;
+        }).toList();
+
+        _upcomingTvFeed.addAll(results);
+        _upcomingTvFeed.sort((a, b) => (a['first_air_date'] as String? ?? '')
+            .compareTo(b['first_air_date'] as String? ?? ''));
+
+        _upcomingTvPage = nextPage;
+        _upcomingTvTotalPages = data['total_pages'] as int? ?? nextPage;
+        _upcomingTvErrored = false;
+      } else {
+        _upcomingTvErrored = true;
+      }
+    } catch (e) {
+      debugPrint('Error fetching upcoming tv: $e');
+      _upcomingTvErrored = true;
+    } finally {
+      _isLoadingUpcomingTv = false;
+      notifyListeners();
+    }
+  }
+
   Future<List<dynamic>> fetchRecommendations(int id, String mediaType) async {
     if (!hasApiKey) {
       return _getMockTrending().take(4).toList();
@@ -347,8 +510,8 @@ class TMDBService extends ChangeNotifier {
     }
 
     if (!hasApiKey) {
-      _searchResults = _getMockTrending().where((element) => 
-        (element['title'] ?? element['name'] ?? '').toString().toLowerCase().contains(query.toLowerCase())
+      _searchResults = _getMockTrending().where((element) =>
+          (element['title'] ?? element['name'] ?? '').toString().toLowerCase().contains(query.toLowerCase())
       ).toList();
       notifyListeners();
       return;
@@ -357,13 +520,13 @@ class TMDBService extends ChangeNotifier {
     _setLoading(true);
     try {
       final response = await http.get(Uri.parse(
-        '$_baseUrl/search/multi?api_key=${AppConfig.tmdbApiKey}&query=${Uri.encodeComponent(query)}'
+          '$_baseUrl/search/multi?api_key=${AppConfig.tmdbApiKey}&query=${Uri.encodeComponent(query)}'
       ));
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
         final results = data['results'] as List<dynamic>? ?? [];
-        _searchResults = results.where((item) => 
-          item['media_type'] == 'movie' || item['media_type'] == 'tv'
+        _searchResults = results.where((item) =>
+        item['media_type'] == 'movie' || item['media_type'] == 'tv'
         ).toList();
       }
     } catch (e) {
@@ -373,6 +536,14 @@ class TMDBService extends ChangeNotifier {
     }
   }
 
+  // ── Details fetch ──────────────────────────────────────────────────────
+  // NOTE: the parsing step below is wrapped in its own try/catch, separate
+  // from the network try/catch. Previously, any bad field shape coming back
+  // from TMDB (e.g. a provider with a null logo_path) threw INSIDE the
+  // network try/catch, which quietly logged and returned null — but in
+  // release mode Flutter's default ErrorWidget renders as a blank white box
+  // with no message, which is why this looked like "shimmer then white
+  // screen" with no visible error.
   Future<Map<String, dynamic>?> fetchDetails(int id, String mediaType, String countryCode) async {
     if (!hasApiKey) {
       return _getMockDetails(id, mediaType, countryCode);
@@ -380,74 +551,120 @@ class TMDBService extends ChangeNotifier {
 
     try {
       final response = await http.get(Uri.parse(
-        '$_baseUrl/$mediaType/$id?api_key=${AppConfig.tmdbApiKey}&append_to_response=videos,watch/providers,credits'
+          '$_baseUrl/$mediaType/$id?api_key=${AppConfig.tmdbApiKey}&append_to_response=videos,watch/providers,credits'
       )).timeout(const Duration(seconds: 15));
 
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
-        return _parseDetails(data, countryCode);
+        try {
+          return _parseDetails(data, countryCode);
+        } catch (e, st) {
+          debugPrint('Error parsing details payload for id=$id ($mediaType): $e\n$st');
+          return null;
+        }
+      } else {
+        debugPrint('fetchDetails non-200 for id=$id: ${response.statusCode}');
       }
     } catch (e) {
-      debugPrint('Error fetching details: $e');
+      debugPrint('Error fetching details for id=$id: $e');
     }
     return null;
   }
 
+  // ── Safe provider mapper ────────────────────────────────────────────────
+  // TMDB frequently returns providers with a null or missing logo_path
+  // (and occasionally a null provider_name). Concatenating a String with
+  // null (`imageBaseUrl + null`) throws a NoSuchMethodError at runtime,
+  // which is what was crashing every single details screen open.
+  List<Map<String, String>> _mapProviders(List<dynamic> list) {
+    return list.whereType<Map>().map((p) {
+      final rawLogo = p['logo_path'];
+      final logoPath = (rawLogo is String && rawLogo.isNotEmpty)
+          ? imageBaseUrl + rawLogo
+          : '';
+      final rawName = p['provider_name'];
+      final name = (rawName is String && rawName.isNotEmpty)
+          ? rawName
+          : 'Provider';
+      return <String, String>{
+        'provider_name': name,
+        'logo_path': logoPath,
+      };
+    }).toList();
+  }
+
   Map<String, dynamic> _parseDetails(Map<String, dynamic> data, String countryCode) {
     final providersWrapper = data['watch/providers'];
-    final Map<String, dynamic> providersData = 
-        (providersWrapper is Map<String, dynamic>) ? (providersWrapper['results'] ?? {}) : {};
-        
+    final Map<String, dynamic> providersData =
+    (providersWrapper is Map<String, dynamic>) ? (providersWrapper['results'] ?? {}) : {};
+
     final regionProviders = providersData[countryCode];
-    final Map<String, dynamic> regionMap = 
-        (regionProviders is Map<String, dynamic>) ? regionProviders : {};
+    final Map<String, dynamic> regionMap =
+    (regionProviders is Map<String, dynamic>) ? regionProviders : {};
 
     final List<dynamic> freeProviders = regionMap['free'] is List ? regionMap['free'] : [];
     final List<dynamic> adsProviders = regionMap['ads'] is List ? regionMap['ads'] : [];
     final List<dynamic> subscriptionProviders = regionMap['flatrate'] is List ? regionMap['flatrate'] : [];
 
     final videosWrapper = data['videos'];
-    final List<dynamic> videos = 
-        (videosWrapper is Map<String, dynamic>) ? (videosWrapper['results'] ?? []) : [];
-        
-    final trailerVideo = videos.firstWhere(
-      (video) => video is Map && video['type'] == 'Trailer' && video['site'] == 'YouTube',
+    final List<dynamic> videos =
+    (videosWrapper is Map<String, dynamic>) ? (videosWrapper['results'] ?? []) : [];
+
+    final dynamic trailerVideo = videos.firstWhere(
+          (video) => video is Map && video['type'] == 'Trailer' && video['site'] == 'YouTube',
       orElse: () => videos.isNotEmpty ? videos.first : null,
     );
 
     final creditsWrapper = data['credits'];
-    final List<dynamic> castList = 
-        (creditsWrapper is Map<String, dynamic>) ? (creditsWrapper['cast'] ?? []) : [];
+    final List<dynamic> rawCastList =
+    (creditsWrapper is Map<String, dynamic>) ? (creditsWrapper['cast'] ?? []) : [];
+    // Only keep entries that are actually Maps, so downstream `as Map<String,dynamic>`
+    // casts in DetailsScreen can't throw on a stray null/String entry.
+    final List<dynamic> castList =
+    rawCastList.whereType<Map>().map((c) => Map<String, dynamic>.from(c)).toList();
 
     double voteAverage = 0.0;
     if (data['vote_average'] is num) {
       voteAverage = (data['vote_average'] as num).toDouble();
     }
 
+    // Genres: guard against genres being missing or malformed, and against
+    // an individual genre entry missing a 'name' key.
+    final rawGenres = data['genres'];
+    final List<String> genreNames = (rawGenres is List)
+        ? rawGenres
+        .whereType<Map>()
+        .map((g) => g['name']?.toString())
+        .whereType<String>()
+        .toList()
+        : <String>[];
+
+    // Seasons: guard against a non-list value.
+    final rawSeasons = data['seasons'];
+    final List<dynamic> safeSeasons = (rawSeasons is List) ? rawSeasons : <dynamic>[];
+
     return {
       'id': data['id'],
       'title': data['title'] ?? data['name'] ?? 'Untitled',
       'overview': data['overview'] ?? '',
-      'backdrop_path': data['backdrop_path'] != null ? backdropBaseUrl + data['backdrop_path'] : null,
-      'poster_path': data['poster_path'] != null ? imageBaseUrl + data['poster_path'] : null,
+      'backdrop_path': (data['backdrop_path'] is String)
+          ? backdropBaseUrl + data['backdrop_path']
+          : null,
+      'poster_path': (data['poster_path'] is String)
+          ? imageBaseUrl + data['poster_path']
+          : null,
       'vote_average': voteAverage,
       'release_date': data['release_date'] ?? data['first_air_date'] ?? 'N/A',
-      'genres': (data['genres'] as List<dynamic>?)?.map((g) => g['name'].toString()).toList() ?? [],
-      'seasons': data['seasons'] ?? [],
-      'trailer_id': trailerVideo != null ? trailerVideo['key'] : null,
+      'genres': genreNames,
+      'seasons': safeSeasons,
+      'trailer_id': (trailerVideo is Map) ? trailerVideo['key'] : null,
       'cast': castList,
-      'free_options': [...freeProviders, ...adsProviders].map((p) => {
-        'provider_name': p['provider_name'],
-        'logo_path': imageBaseUrl + p['logo_path'],
-      }).toList(),
-      'subscription_options': subscriptionProviders.map((p) => {
-        'provider_name': p['provider_name'],
-        'logo_path': imageBaseUrl + p['logo_path'],
-      }).toList(),
+      'free_options': _mapProviders([...freeProviders, ...adsProviders]),
+      'subscription_options': _mapProviders(subscriptionProviders),
     };
   }
 
-  // --- Mock Generators for Demo Mode ---
+  // --- Mock Generators for Demo Mode (used only when no API key is set) ---
   List<dynamic> _getMockTrending() {
     return [
       ..._getMockMovies(),
@@ -547,6 +764,21 @@ class TMDBService extends ChangeNotifier {
     ];
   }
 
+  List<dynamic> _getMockUpcomingTv() {
+    return [
+      {
+        'id': 201,
+        'name': 'Stranger Things: Season 5',
+        'media_type': 'tv',
+        'poster_path': 'https://images.unsplash.com/photo-1535016120720-40c646be5580?w=500',
+        'backdrop_path': 'https://images.unsplash.com/photo-1535016120720-40c646be5580?w=1000',
+        'vote_average': 0.0,
+        'first_air_date': '2026-11-26',
+        'overview': 'The final season of the hit sci-fi horror series, demo mode placeholder — connect a TMDB API key for live data.'
+      }
+    ];
+  }
+
   Map<String, dynamic> _getMockDetails(int id, String mediaType, String countryCode) {
     final mockList = _getMockTrending();
     final item = mockList.firstWhere((element) => element['id'] == id, orElse: () => mockList.first);
@@ -581,7 +813,6 @@ class TMDBService extends ChangeNotifier {
       ];
     }
 
-    // Dynamic country watch providers mock
     if (countryCode == 'IN') {
       subList = [
         {'provider_name': 'Disney+ Hotstar', 'logo_path': 'https://upload.wikimedia.org/wikipedia/commons/3/3e/Disney%2B_logo.png'},

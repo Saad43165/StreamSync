@@ -1,5 +1,8 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+
 import '../services/database_service.dart';
 import '../theme/app_theme.dart';
 import '../widgets/glass_card.dart';
@@ -16,186 +19,432 @@ class DownloadsScreen extends StatelessWidget {
     return Scaffold(
       backgroundColor: AppTheme.background,
       appBar: AppBar(
-        title: const Text('Offline Downloads', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
+        title: const Text(
+          'Downloads',
+          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
+        ),
         backgroundColor: Colors.transparent,
         elevation: 0,
         foregroundColor: Colors.white,
+        actions: [
+          if (downloads.isNotEmpty)
+            TextButton.icon(
+              onPressed: () => _confirmDeleteAll(context, dbService, downloads),
+              icon: const Icon(Icons.delete_sweep_rounded, size: 18, color: Colors.redAccent),
+              label: const Text('Clear all', style: TextStyle(color: Colors.redAccent, fontSize: 12)),
+            ),
+        ],
       ),
-      body: downloads.isEmpty
-          ? Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Container(
-                    padding: const EdgeInsets.all(20),
-                    decoration: BoxDecoration(
-                      color: AppTheme.accent.withOpacity(0.1),
-                      shape: BoxShape.circle,
-                    ),
-                    child: const Icon(Icons.download_for_offline_rounded, size: 64, color: AppTheme.accent),
-                  ),
-                  const SizedBox(height: 20),
-                  const Text(
-                    'No downloaded content found.',
-                    style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
-                  ),
-                  const SizedBox(height: 8),
-                  const Text(
-                    'Tap the download button on any movie/show details page.',
-                    style: TextStyle(color: AppTheme.textSecondary, fontSize: 12),
-                  ),
-                ],
-              ),
-            )
-          : ListView.builder(
-              padding: const EdgeInsets.all(16),
-              itemCount: downloads.length,
-              itemBuilder: (context, index) {
-                final item = downloads[index];
-                final title = item['title'] ?? 'Untitled';
-                final mediaType = item['media_type'] ?? 'movie';
-                final date = item['download_date'] ?? '';
-                final isTv = mediaType == 'tv';
+      body: downloads.isEmpty ? _emptyState() : _list(context, dbService, downloads),
+    );
+  }
 
-                return Dismissible(
-                  key: Key(item['id'].toString()),
-                  direction: DismissDirection.endToStart,
-                  background: Container(
-                    alignment: Alignment.centerRight,
-                    padding: const EdgeInsets.only(right: 20),
-                    decoration: BoxDecoration(
-                      color: Colors.redAccent.shade700,
-                      borderRadius: BorderRadius.circular(16),
-                    ),
-                    child: const Icon(Icons.delete_sweep_rounded, color: Colors.white, size: 28),
-                  ),
-                  onDismissed: (_) {
-                    dbService.removeDownload(item['id'] as int);
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(content: Text('Removed "$title" from downloads.')),
-                    );
-                  },
-                  child: Container(
-                    margin: const EdgeInsets.only(bottom: 12),
-                    child: InkWell(
-                      onTap: () {
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (context) => NativeStreamPlayerScreen(
-                              id: item['id'] as int,
-                              title: title,
-                              mediaType: mediaType,
-                              season: 1,
-                              episode: 1,
-                              seasons: item['seasons'] as List<dynamic>? ?? const [],
-                              isOffline: true,
-                            ),
+  // ── Empty state ───────────────────────────────────────────────────────────
+
+  Widget _emptyState() {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Container(
+            padding: const EdgeInsets.all(24),
+            decoration: BoxDecoration(
+              color: AppTheme.accent.withValues(alpha: 0.1),
+              shape: BoxShape.circle,
+            ),
+            child: const Icon(
+              Icons.download_for_offline_rounded,
+              size: 64,
+              color: AppTheme.accent,
+            ),
+          ),
+          const SizedBox(height: 20),
+          const Text(
+            'No downloads yet',
+            style: TextStyle(color: Colors.white, fontSize: 17, fontWeight: FontWeight.bold),
+          ),
+          const SizedBox(height: 8),
+          const Padding(
+            padding: EdgeInsets.symmetric(horizontal: 40),
+            child: Text(
+              'Tap the download icon on any movie or show to save it for offline viewing.',
+              textAlign: TextAlign.center,
+              style: TextStyle(color: AppTheme.textSecondary, fontSize: 13, height: 1.5),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ── List ─────────────────────────────────────────────────────────────────
+
+  Widget _list(
+      BuildContext context,
+      DatabaseService dbService,
+      List<Map<String, dynamic>> downloads,
+      ) {
+    return ListView.builder(
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 100),
+      itemCount: downloads.length,
+      itemBuilder: (context, index) {
+        final item = downloads[index];
+        return _DownloadTile(
+          item: item,
+          onDelete: () => _deleteItem(context, dbService, item),
+          onTap: () => _openOffline(context, item),
+        );
+      },
+    );
+  }
+
+  // ── Actions ──────────────────────────────────────────────────────────────
+
+  void _openOffline(BuildContext context, Map<String, dynamic> item) {
+    final filePath = item['local_file_path'] as String?;
+    if (filePath == null || !File(filePath).existsSync()) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('File not found on device. It may have been deleted.'),
+          backgroundColor: Colors.redAccent,
+        ),
+      );
+      return;
+    }
+
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => NativeStreamPlayerScreen(
+          id:        item['id'] as int,
+          title:     item['title'] ?? item['name'] ?? 'Untitled',
+          mediaType: item['media_type'] ?? 'movie',
+          season:    1,
+          episode:   1,
+          seasons:   item['seasons'] as List<dynamic>? ?? const [],
+          isOffline: true,
+        ),
+      ),
+    );
+  }
+
+  Future<void> _deleteItem(
+      BuildContext context,
+      DatabaseService dbService,
+      Map<String, dynamic> item,
+      ) async {
+    final title    = item['title'] ?? item['name'] ?? 'this item';
+    final filePath = item['local_file_path'] as String?;
+
+    // Delete local file
+    if (filePath != null) {
+      final f = File(filePath);
+      if (await f.exists()) await f.delete();
+    }
+
+    // Remove DB record
+    await dbService.removeDownload(item['id'] as int);
+
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('"$title" deleted.'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
+  }
+
+  Future<void> _confirmDeleteAll(
+      BuildContext context,
+      DatabaseService dbService,
+      List<Map<String, dynamic>> downloads,
+      ) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        backgroundColor: AppTheme.background,
+        title: const Text('Clear all downloads?', style: TextStyle(color: Colors.white)),
+        content: const Text(
+          'All downloaded files will be permanently deleted from your device.',
+          style: TextStyle(color: AppTheme.textSecondary),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel', style: TextStyle(color: Colors.white54)),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Delete all', style: TextStyle(color: Colors.redAccent)),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true || !context.mounted) return;
+
+    for (final item in downloads) {
+      final fp = item['local_file_path'] as String?;
+      if (fp != null) {
+        final f = File(fp);
+        if (await f.exists()) await f.delete();
+      }
+      await dbService.removeDownload(item['id'] as int);
+    }
+  }
+}
+
+// ── Individual tile ───────────────────────────────────────────────────────
+
+class _DownloadTile extends StatelessWidget {
+  final Map<String, dynamic> item;
+  final VoidCallback onDelete;
+  final VoidCallback onTap;
+
+  const _DownloadTile({
+    required this.item,
+    required this.onDelete,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final title     = item['title'] ?? item['name'] ?? 'Untitled';
+    final mediaType = item['media_type'] ?? 'movie';
+    final date      = (item['download_date'] as String? ?? '').split('T').first;
+    final isTv      = mediaType == 'tv';
+    final sizeBytes = item['file_size_bytes'] as int? ?? 0;
+    final filePath  = item['local_file_path'] as String?;
+    final fileExists = filePath != null && File(filePath).existsSync();
+
+    return Dismissible(
+      key: Key('${item['id']}_${item['download_date']}'),
+      direction: DismissDirection.endToStart,
+      confirmDismiss: (_) async {
+        return await showDialog<bool>(
+          context: context,
+          builder: (_) => AlertDialog(
+            backgroundColor: AppTheme.background,
+            title: Text(
+              'Delete "$title"?',
+              style: const TextStyle(color: Colors.white, fontSize: 16),
+            ),
+            content: const Text(
+              'The file will be removed from your device.',
+              style: TextStyle(color: AppTheme.textSecondary),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context, false),
+                child: const Text('Cancel', style: TextStyle(color: Colors.white54)),
+              ),
+              TextButton(
+                onPressed: () => Navigator.pop(context, true),
+                child: const Text('Delete', style: TextStyle(color: Colors.redAccent)),
+              ),
+            ],
+          ),
+        ) ?? false;
+      },
+      onDismissed: (_) => onDelete(),
+      background: Container(
+        margin: const EdgeInsets.only(bottom: 12),
+        alignment: Alignment.centerRight,
+        padding: const EdgeInsets.only(right: 24),
+        decoration: BoxDecoration(
+          color: Colors.redAccent.shade700,
+          borderRadius: BorderRadius.circular(16),
+        ),
+        child: const Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.delete_rounded, color: Colors.white, size: 26),
+            SizedBox(height: 4),
+            Text('Delete', style: TextStyle(color: Colors.white, fontSize: 11)),
+          ],
+        ),
+      ),
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 12),
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(16),
+          child: GlassCard(
+            padding: const EdgeInsets.all(12),
+            borderRadius: 16,
+            child: Row(
+              children: [
+                // ── Poster ─────────────────────────────────────────────
+                _Poster(posterPath: item['poster_path'] as String?),
+
+                const SizedBox(width: 14),
+
+                // ── Info ───────────────────────────────────────────────
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      // Badge row
+                      Row(
+                        children: [
+                          _Badge(
+                            label: isTv ? 'SERIES' : 'MOVIE',
+                            color: isTv ? Colors.purpleAccent : Colors.blueAccent,
                           ),
-                        );
-                      },
-                      borderRadius: BorderRadius.circular(16),
-                      child: GlassCard(
-                        padding: const EdgeInsets.all(12),
-                        borderRadius: 16,
-                        child: Row(
-                          children: [
-                            ClipRRect(
-                              borderRadius: BorderRadius.circular(10),
-                              child: Container(
-                                width: 70,
-                                height: 95,
-                                color: Colors.white10,
-                                child: item['poster_path'] != null && (item['poster_path'] as String).startsWith('http')
-                                    ? Image.network(
-                                        item['poster_path'] as String,
-                                        fit: BoxFit.cover,
-                                        errorBuilder: (_, __, ___) => const Icon(Icons.movie_rounded, color: Colors.white24),
-                                      )
-                                    : const Icon(Icons.movie_rounded, color: Colors.white24),
-                              ),
-                            ),
-                            const SizedBox(width: 16),
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Container(
-                                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                                    decoration: BoxDecoration(
-                                      color: isTv ? Colors.purpleAccent.withOpacity(0.2) : Colors.blueAccent.withOpacity(0.2),
-                                      borderRadius: BorderRadius.circular(4),
-                                    ),
-                                    child: Text(
-                                      isTv ? 'SERIES' : 'MOVIE',
-                                      style: TextStyle(
-                                        color: isTv ? Colors.purpleAccent : Colors.blueAccent,
-                                        fontSize: 9,
-                                        fontWeight: FontWeight.bold,
-                                      ),
-                                    ),
-                                  ),
-                                  const SizedBox(height: 8),
-                                  Text(
-                                    title,
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: const TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.bold),
-                                  ),
-                                  const SizedBox(height: 6),
-                                   Row(
-                                    children: [
-                                      if (item['download_quality'] != null) ...[
-                                        Container(
-                                          padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
-                                          decoration: BoxDecoration(color: Colors.white10, borderRadius: BorderRadius.circular(4)),
-                                          child: Text(
-                                            item['download_quality'].toString(),
-                                            style: const TextStyle(color: AppTheme.secondaryAccent, fontSize: 9, fontWeight: FontWeight.bold),
-                                          ),
-                                        ),
-                                        const SizedBox(width: 6),
-                                      ],
-                                      if (item['download_language'] != null) ...[
-                                        Container(
-                                          padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
-                                          decoration: BoxDecoration(color: Colors.white10, borderRadius: BorderRadius.circular(4)),
-                                          child: Text(
-                                            item['download_language'].toString(),
-                                            style: const TextStyle(color: Colors.white70, fontSize: 9),
-                                          ),
-                                        ),
-                                        const SizedBox(width: 6),
-                                      ],
-                                      if (item['file_size_bytes'] != null) ...[
-                                        Container(
-                                          padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
-                                          decoration: BoxDecoration(color: Colors.white10, borderRadius: BorderRadius.circular(4)),
-                                          child: Text(
-                                            '${((item['file_size_bytes'] as int) / (1024 * 1024)).toStringAsFixed(1)} MB',
-                                            style: const TextStyle(color: Colors.greenAccent, fontSize: 9),
-                                          ),
-                                        ),
-                                      ],
-                                    ],
-                                  ),
-                                  const SizedBox(height: 6),
-                                  Text(
-                                    'Downloaded: ${date.split("T").first}',
-                                    style: const TextStyle(color: AppTheme.textSecondary, fontSize: 10),
-                                  ),
-                                ],
-                              ),
-                            ),
-                            const Icon(Icons.play_circle_outline_rounded, color: AppTheme.accent, size: 28),
+                          if (!fileExists) ...[
+                            const SizedBox(width: 6),
+                            _Badge(label: 'FILE MISSING', color: Colors.redAccent),
                           ],
+                        ],
+                      ),
+                      const SizedBox(height: 7),
+
+                      // Title
+                      Text(
+                        title,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 15,
+                          fontWeight: FontWeight.bold,
                         ),
                       ),
-                    ),
+                      const SizedBox(height: 6),
+
+                      // Metadata chips
+                      Wrap(
+                        spacing: 5,
+                        runSpacing: 4,
+                        children: [
+                          if (item['download_quality'] != null)
+                            _Chip(
+                              label: item['download_quality'].toString(),
+                              color: AppTheme.secondaryAccent,
+                            ),
+                          if (item['download_language'] != null)
+                            _Chip(label: item['download_language'].toString()),
+                          if (sizeBytes > 0)
+                            _Chip(
+                              label: _formatSize(sizeBytes),
+                              color: Colors.greenAccent,
+                            ),
+                          if (item['stream_source'] != null)
+                            _Chip(label: item['stream_source'].toString()),
+                        ],
+                      ),
+                      const SizedBox(height: 6),
+
+                      // Date
+                      Text(
+                        'Saved $date',
+                        style: const TextStyle(
+                          color: AppTheme.textSecondary,
+                          fontSize: 10,
+                        ),
+                      ),
+                    ],
                   ),
-                );
-              },
+                ),
+
+                const SizedBox(width: 8),
+
+                // ── Play button ─────────────────────────────────────────
+                Icon(
+                  fileExists
+                      ? Icons.play_circle_fill_rounded
+                      : Icons.error_outline_rounded,
+                  color: fileExists ? AppTheme.accent : Colors.redAccent,
+                  size: 32,
+                ),
+              ],
             ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  String _formatSize(int bytes) {
+    if (bytes >= 1024 * 1024 * 1024) {
+      return '${(bytes / (1024 * 1024 * 1024)).toStringAsFixed(1)} GB';
+    }
+    return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
+  }
+}
+
+// ── Sub-widgets ───────────────────────────────────────────────────────────
+
+class _Poster extends StatelessWidget {
+  final String? posterPath;
+  const _Poster({this.posterPath});
+
+  @override
+  Widget build(BuildContext context) {
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(10),
+      child: Container(
+        width: 68,
+        height: 94,
+        color: Colors.white10,
+        child: posterPath != null && posterPath!.startsWith('http')
+            ? Image.network(
+          posterPath!,
+          fit: BoxFit.cover,
+          errorBuilder: (_, __, ___) => const _PosterPlaceholder(),
+        )
+            : const _PosterPlaceholder(),
+      ),
+    );
+  }
+}
+
+class _PosterPlaceholder extends StatelessWidget {
+  const _PosterPlaceholder();
+  @override
+  Widget build(BuildContext context) =>
+      const Icon(Icons.movie_rounded, color: Colors.white24, size: 32);
+}
+
+class _Badge extends StatelessWidget {
+  final String label;
+  final Color color;
+  const _Badge({required this.label, this.color = Colors.white54});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.18),
+        borderRadius: BorderRadius.circular(4),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(color: color, fontSize: 9, fontWeight: FontWeight.bold),
+      ),
+    );
+  }
+}
+
+class _Chip extends StatelessWidget {
+  final String label;
+  final Color color;
+  const _Chip({required this.label, this.color = Colors.white70});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+      decoration: BoxDecoration(
+        color: Colors.white10,
+        borderRadius: BorderRadius.circular(4),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(color: color, fontSize: 9, fontWeight: FontWeight.w500),
+      ),
     );
   }
 }

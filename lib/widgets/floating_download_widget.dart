@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+
 import '../services/download_service.dart';
 import '../theme/app_theme.dart';
 import 'glass_card.dart';
@@ -11,15 +12,35 @@ class FloatingDownloadWidget extends StatefulWidget {
   State<FloatingDownloadWidget> createState() => _FloatingDownloadWidgetState();
 }
 
-class _FloatingDownloadWidgetState extends State<FloatingDownloadWidget> {
+class _FloatingDownloadWidgetState extends State<FloatingDownloadWidget>
+    with SingleTickerProviderStateMixin {
   bool _isExpanded = false;
+  late final AnimationController _pulseController;
+  late final Animation<double> _pulseAnim;
+
+  @override
+  void initState() {
+    super.initState();
+    _pulseController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1200),
+    )..repeat(reverse: true);
+    _pulseAnim = Tween<double>(begin: 0.85, end: 1.0).animate(
+      CurvedAnimation(parent: _pulseController, curve: Curves.easeInOut),
+    );
+  }
+
+  @override
+  void dispose() {
+    _pulseController.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
     return Consumer<DownloadService>(
-      builder: (context, downloadService, child) {
-        if (downloadService.activeProgress.isEmpty) {
-          // If was expanded and now finished, reset state for next time
+      builder: (context, svc, _) {
+        if (svc.activeProgress.isEmpty) {
           if (_isExpanded) {
             WidgetsBinding.instance.addPostFrameCallback((_) {
               if (mounted) setState(() => _isExpanded = false);
@@ -28,104 +49,218 @@ class _FloatingDownloadWidgetState extends State<FloatingDownloadWidget> {
           return const SizedBox.shrink();
         }
 
-        final activeId = downloadService.activeProgress.keys.first;
-        final progress = downloadService.activeProgress[activeId] ?? 0.0;
-        final status = downloadService.activeStatus[activeId] ?? '';
-        final details = downloadService.activeDetails[activeId];
-        final title = details?['title'] ?? details?['name'] ?? 'Downloading...';
+        final activeId = svc.activeProgress.keys.first;
+        final progress = svc.activeProgress[activeId] ?? 0.0;
+        final status   = svc.activeStatus[activeId]   ?? '';
+        final details  = svc.activeDetails[activeId];
+        final title    = details?['title'] ?? details?['name'] ?? 'Downloading…';
+        final isPaused = status.contains('Paused');
+        final isDone   = progress >= 1.0;
 
         return Positioned(
-          bottom: 100, // Above the bottom navigation bar
-          right: 20,
+          bottom: 108,
+          right: 16,
           child: GestureDetector(
-            onTap: () {
-              setState(() {
-                _isExpanded = !_isExpanded;
-              });
-            },
+            onTap: () => setState(() => _isExpanded = !_isExpanded),
             child: AnimatedContainer(
-              duration: const Duration(milliseconds: 300),
+              duration: const Duration(milliseconds: 280),
               curve: Curves.easeOutQuart,
-              width: _isExpanded ? 240 : 56,
-              height: 56,
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(28),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.3),
-                    blurRadius: 16,
-                    offset: const Offset(0, 8),
-                  )
-                ],
-              ),
-              child: GlassCard(
-                borderRadius: 28,
-                padding: EdgeInsets.zero,
-                child: Row(
-                  children: [
-                    SizedBox(
-                      width: 56,
-                      height: 56,
-                      child: Stack(
-                        alignment: Alignment.center,
-                        children: [
-                          SizedBox(
-                            width: 32,
-                            height: 32,
-                            child: CircularProgressIndicator(
-                              value: progress,
-                              backgroundColor: Colors.white.withValues(alpha: 0.1),
-                              color: AppTheme.accent,
-                              strokeWidth: 3,
-                            ),
-                          ),
-                          Icon(
-                            _isExpanded ? Icons.close_fullscreen_rounded : Icons.download_rounded, 
-                            size: 16, 
-                            color: Colors.white
-                          ),
-                        ],
-                      ),
-                    ),
-                    if (_isExpanded)
-                      Expanded(
-                        child: Padding(
-                          padding: const EdgeInsets.only(right: 12.0),
-                          child: Column(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                title,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
-                              ),
-                              const SizedBox(height: 2),
-                              Row(
-                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                children: [
-                                  Text(
-                                    status,
-                                    style: const TextStyle(color: Colors.white70, fontSize: 11),
-                                  ),
-                                  GestureDetector(
-                                    onTap: () => downloadService.cancelDownload(activeId),
-                                    child: const Icon(Icons.cancel_rounded, color: Colors.redAccent, size: 16),
-                                  )
-                                ],
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                  ],
-                ),
+              width:  _isExpanded ? 260 : 58,
+              height: _isExpanded ? 92  : 58,
+              child: _DownloadCard(
+                isExpanded: _isExpanded,
+                progress:   progress,
+                status:     status,
+                title:      title,
+                isPaused:   isPaused,
+                isDone:     isDone,
+                pulseAnim:  _pulseAnim,
+                onCancel:   () => svc.cancelDownload(activeId),
+                onPause:    () => svc.pauseDownload(activeId),
+                onResume:   () => svc.resumeDownload(activeId),
               ),
             ),
           ),
         );
       },
+    );
+  }
+}
+
+// ── Card renderer (separated for clarity) ──────────────────────────────────
+
+class _DownloadCard extends StatelessWidget {
+  final bool isExpanded;
+  final double progress;
+  final String status;
+  final String title;
+  final bool isPaused;
+  final bool isDone;
+  final Animation<double> pulseAnim;
+  final VoidCallback onCancel;
+  final VoidCallback onPause;
+  final VoidCallback onResume;
+
+  const _DownloadCard({
+    required this.isExpanded,
+    required this.progress,
+    required this.status,
+    required this.title,
+    required this.isPaused,
+    required this.isDone,
+    required this.pulseAnim,
+    required this.onCancel,
+    required this.onPause,
+    required this.onResume,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(29),
+      child: GlassCard(
+        borderRadius: 29,
+        padding: EdgeInsets.zero,
+        child: isExpanded ? _expandedBody() : _collapsedBody(),
+      ),
+    );
+  }
+
+  // ── Collapsed: circular progress pill ──────────────────────────────────
+
+  Widget _collapsedBody() {
+    return SizedBox(
+      width: 58,
+      height: 58,
+      child: Stack(
+        alignment: Alignment.center,
+        children: [
+          SizedBox(
+            width: 36,
+            height: 36,
+            child: CircularProgressIndicator(
+              value: progress < 0.02 ? null : progress, // indeterminate while resolving
+              backgroundColor: Colors.white12,
+              color: isDone ? Colors.greenAccent : AppTheme.accent,
+              strokeWidth: 3,
+            ),
+          ),
+          AnimatedBuilder(
+            animation: pulseAnim,
+            builder: (_, child) => Transform.scale(scale: pulseAnim.value, child: child),
+            child: Icon(
+              isDone ? Icons.check_rounded : Icons.download_rounded,
+              size: 16,
+              color: Colors.white,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ── Expanded: full download card ────────────────────────────────────────
+
+  Widget _expandedBody() {
+    final pct = (progress * 100).toInt();
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          // Title row
+          Row(
+            children: [
+              const Icon(Icons.download_rounded, size: 14, color: AppTheme.accent),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontWeight: FontWeight.w700,
+                    fontSize: 13,
+                    color: Colors.white,
+                  ),
+                ),
+              ),
+              // Cancel button
+              GestureDetector(
+                onTap: onCancel,
+                child: const Icon(Icons.close_rounded, color: Colors.white54, size: 16),
+              ),
+            ],
+          ),
+
+          const SizedBox(height: 8),
+
+          // Progress bar
+          ClipRRect(
+            borderRadius: BorderRadius.circular(4),
+            child: LinearProgressIndicator(
+              value: progress < 0.02 ? null : progress,
+              backgroundColor: Colors.white12,
+              valueColor: AlwaysStoppedAnimation<Color>(
+                isDone ? Colors.greenAccent : AppTheme.accent,
+              ),
+              minHeight: 5,
+            ),
+          ),
+
+          const SizedBox(height: 6),
+
+          // Status row + pause/resume
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Expanded(
+                child: Text(
+                  isDone ? status : (progress >= 0.02 ? '$pct% · $status' : status),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: isDone ? Colors.greenAccent : Colors.white60,
+                    fontSize: 11,
+                  ),
+                ),
+              ),
+              if (!isDone)
+                GestureDetector(
+                  onTap: isPaused ? onResume : onPause,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                    decoration: BoxDecoration(
+                      color: AppTheme.accent.withValues(alpha: 0.2),
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          isPaused ? Icons.play_arrow_rounded : Icons.pause_rounded,
+                          size: 12,
+                          color: AppTheme.accent,
+                        ),
+                        const SizedBox(width: 3),
+                        Text(
+                          isPaused ? 'Resume' : 'Pause',
+                          style: const TextStyle(
+                            color: AppTheme.accent,
+                            fontSize: 10,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        ],
+      ),
     );
   }
 }

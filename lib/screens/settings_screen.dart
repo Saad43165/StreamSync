@@ -29,9 +29,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   Future<void> _loadMetrics() async {
-    setState(() {
-      _isLoadingMetrics = true;
-    });
+    if (!mounted) return;
+    setState(() => _isLoadingMetrics = true);
 
     try {
       final docDir = await getApplicationDocumentsDirectory();
@@ -51,20 +50,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
         }
       }
 
-      if (mounted) {
-        setState(() {
-          _downloadsSize = "${(downloadsBytes / (1024 * 1024)).toStringAsFixed(1)} MB";
-          _cacheSize = "${(cacheBytes / 1024).toStringAsFixed(1)} KB";
-          _isLoadingMetrics = false;
-        });
-      }
+      if (!mounted) return;
+      setState(() {
+        _downloadsSize = "${(downloadsBytes / (1024 * 1024)).toStringAsFixed(1)} MB";
+        _cacheSize = "${(cacheBytes / 1024).toStringAsFixed(1)} KB";
+        _isLoadingMetrics = false;
+      });
     } catch (e) {
       debugPrint('Error loading file storage metrics: $e');
-      if (mounted) {
-        setState(() {
-          _isLoadingMetrics = false;
-        });
-      }
+      if (mounted) setState(() => _isLoadingMetrics = false);
     }
   }
 
@@ -75,9 +69,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
         backgroundColor: AppTheme.surface,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         title: const Text('Clear TMDB Cache', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-        content: const Text(
-          'This will wipe out cached pages and offline lists, forcing the app to fetch real-time fresh API data.',
-          style: TextStyle(color: AppTheme.textSecondary, fontSize: 13, height: 1.4),
+        content: Text(
+          'This will wipe out $_cacheSize of cached pages and offline lists, forcing the app to fetch real-time fresh API data.',
+          style: const TextStyle(color: AppTheme.textSecondary, fontSize: 13, height: 1.4),
         ),
         actions: [
           TextButton(
@@ -92,19 +86,24 @@ class _SettingsScreenState extends State<SettingsScreen> {
       ),
     );
 
-    if (confirmed == true) {
-      try {
-        final cacheBox = Hive.box('tmdb_cache_box');
-        await cacheBox.clear();
-        await tmdbService.fetchTrending();
-        await _loadMetrics();
-        if (context.mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Hive TMDB Category cache cleared successfully.')),
-          );
-        }
-      } catch (e) {
-        debugPrint('Failed to clear hive box: $e');
+    if (confirmed != true) return;
+
+    try {
+      final cacheBox = Hive.box('tmdb_cache_box');
+      await cacheBox.clear();
+      await tmdbService.fetchTrending();
+      await _loadMetrics();
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('TMDB category cache cleared successfully.')),
+        );
+      }
+    } catch (e) {
+      debugPrint('Failed to clear hive box: $e');
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not clear cache — please try again.')),
+        );
       }
     }
   }
@@ -116,9 +115,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
         backgroundColor: AppTheme.surface,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         title: const Text('Delete All Downloads', style: TextStyle(color: Colors.redAccent, fontWeight: FontWeight.bold)),
-        content: const Text(
-          'This will permanently delete ALL offline video files (.mp4 chunks) from your local device storage.',
-          style: TextStyle(color: AppTheme.textSecondary, fontSize: 13, height: 1.4),
+        content: Text(
+          'This will permanently delete all $_downloadsSize of offline video files from your local device storage.',
+          style: const TextStyle(color: AppTheme.textSecondary, fontSize: 13, height: 1.4),
         ),
         actions: [
           TextButton(
@@ -133,17 +132,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
       ),
     );
 
-    if (confirmed == true) {
-      final list = List.from(dbService.downloads);
-      for (final item in list) {
-        await dbService.removeDownload(item['id'] as int);
-      }
-      await _loadMetrics();
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('All offline storage files purged.')),
-        );
-      }
+    if (confirmed != true) return;
+
+    final list = List.from(dbService.downloads);
+    for (final item in list) {
+      await dbService.removeDownload(item['id'] as int);
+      if (!mounted) return;
+    }
+    await _loadMetrics();
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('All offline storage files purged.')),
+      );
     }
   }
 
@@ -163,330 +163,328 @@ class _SettingsScreenState extends State<SettingsScreen> {
         elevation: 0,
         foregroundColor: Colors.white,
       ),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // ─── Account Section ───────────────────────────
-            _sectionLabel('Account Details'),
-            _settingsCard([
-              if (dbService.isLoggedIn) ...[
-                _infotile(
-                  icon: Icons.person_rounded,
-                  label: 'Signed in as',
-                  trailing: Text(
-                    '@${dbService.username}',
-                    style: const TextStyle(color: AppTheme.accent, fontSize: 13, fontWeight: FontWeight.bold),
+      body: RefreshIndicator(
+        color: AppTheme.accent,
+        backgroundColor: AppTheme.surface,
+        onRefresh: _loadMetrics,
+        child: SingleChildScrollView(
+          physics: const AlwaysScrollableScrollPhysics(),
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _sectionLabel('Account Details'),
+              _settingsCard([
+                if (dbService.isLoggedIn) ...[
+                  _infotile(
+                    icon: Icons.person_rounded,
+                    label: 'Signed in as',
+                    trailing: Text(
+                      '@${dbService.username}',
+                      style: const TextStyle(color: AppTheme.accent, fontSize: 13, fontWeight: FontWeight.bold),
+                    ),
+                  ),
+                  _divider(),
+                  _infotile(
+                    icon: Icons.email_outlined,
+                    label: 'Email Address',
+                    trailing: Text(
+                      dbService.email,
+                      style: const TextStyle(color: AppTheme.textSecondary, fontSize: 12),
+                    ),
+                  ),
+                  _divider(),
+                  _actiontile(
+                    icon: Icons.logout_rounded,
+                    label: 'Sign Out Account',
+                    color: Colors.redAccent,
+                    onTap: () {
+                      dbService.logout();
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('Signed out successfully.')),
+                      );
+                    },
+                  ),
+                ] else ...[
+                  _actiontile(
+                    icon: Icons.login_rounded,
+                    label: 'Sign In / Register Account',
+                    color: AppTheme.accent,
+                    onTap: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(builder: (_) => const LoginScreen(showSkipButton: false)),
+                    ),
+                  ),
+                  const Padding(
+                    padding: EdgeInsets.fromLTRB(16, 4, 16, 14),
+                    child: Text(
+                      'Unlock cross-device sync of watchlist, watch history progress, and offline settings preferences.',
+                      style: TextStyle(color: AppTheme.textSecondary, fontSize: 11, height: 1.4),
+                    ),
+                  ),
+                ],
+              ]).animate().fade(duration: 350.ms).slideY(begin: 0.1, end: 0, curve: Curves.easeOutQuad),
+
+              const SizedBox(height: 20),
+
+              _sectionLabel('Device & App Statistics'),
+              GridView.count(
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                crossAxisCount: 2,
+                childAspectRatio: 1.6,
+                crossAxisSpacing: 10,
+                mainAxisSpacing: 10,
+                children: [
+                  _statCard(
+                    title: 'Offline Files',
+                    value: _isLoadingMetrics ? "..." : _downloadsSize,
+                    subtitle: '${dbService.downloads.length} items saved',
+                    icon: Icons.download_done_rounded,
+                    iconColor: AppTheme.accent,
+                  ),
+                  _statCard(
+                    title: 'TMDB Cache Box',
+                    value: _isLoadingMetrics ? "..." : _cacheSize,
+                    subtitle: 'Local API Store',
+                    icon: Icons.storage_rounded,
+                    iconColor: AppTheme.secondaryAccent,
+                  ),
+                  _statCard(
+                    title: 'Watch Duration',
+                    value: '${dbService.totalHoursWatched} Hours',
+                    subtitle: 'Recorded playback',
+                    icon: Icons.hourglass_empty_rounded,
+                    iconColor: Colors.blueAccent,
+                  ),
+                  _statCard(
+                    title: 'Watchlist Storage',
+                    value: '${dbService.watchlist.length} Titles',
+                    subtitle: 'Saved for later',
+                    icon: Icons.bookmark_added_rounded,
+                    iconColor: Colors.pinkAccent,
+                  ),
+                ],
+              ).animate().fade(duration: 400.ms, delay: 50.ms).slideY(begin: 0.1, end: 0, curve: Curves.easeOutQuad),
+
+              const SizedBox(height: 20),
+
+              _sectionLabel('Active User Profile'),
+              _settingsCard([
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 16),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                    children: dbService.profiles.map((profile) {
+                      final isCurrent = dbService.currentProfile == profile;
+                      Color profileColor = Colors.purpleAccent;
+                      if (profile == 'Family') profileColor = Colors.blueAccent;
+                      if (profile == 'Kids') profileColor = Colors.greenAccent;
+
+                      return GestureDetector(
+                        onTap: () {
+                          dbService.selectProfile(profile);
+                          _loadMetrics();
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(content: Text('Switched profile to: $profile')),
+                          );
+                        },
+                        child: AnimatedOpacity(
+                          opacity: isCurrent ? 1.0 : 0.5,
+                          duration: const Duration(milliseconds: 250),
+                          child: Column(
+                            children: [
+                              AnimatedContainer(
+                                duration: const Duration(milliseconds: 250),
+                                padding: EdgeInsets.all(isCurrent ? 3 : 0),
+                                decoration: BoxDecoration(
+                                  shape: BoxShape.circle,
+                                  border: Border.all(
+                                    color: isCurrent ? profileColor : Colors.transparent,
+                                    width: 2,
+                                  ),
+                                ),
+                                child: CircleAvatar(
+                                  radius: 24,
+                                  backgroundColor: profileColor.withValues(alpha: 0.25),
+                                  child: Text(
+                                    profile.substring(0, 1),
+                                    style: TextStyle(color: profileColor, fontSize: 18, fontWeight: FontWeight.bold),
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(height: 6),
+                              Text(
+                                profile,
+                                style: TextStyle(
+                                  color: isCurrent ? Colors.white : AppTheme.textSecondary,
+                                  fontSize: 11,
+                                  fontWeight: isCurrent ? FontWeight.bold : FontWeight.normal,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      );
+                    }).toList(),
                   ),
                 ),
-                _divider(),
-                _infotile(
-                  icon: Icons.email_outlined,
-                  label: 'Email Address',
+              ]).animate().fade(duration: 450.ms, delay: 100.ms).slideY(begin: 0.1, end: 0, curve: Curves.easeOutQuad),
+
+              const SizedBox(height: 20),
+
+              _sectionLabel('Streaming settings'),
+              _settingsCard([
+                _actiontile(
+                  icon: Icons.language_rounded,
+                  label: 'Streaming Region',
                   trailing: Text(
-                    dbService.email,
+                    dbService.selectedCountry == 'US' ? '🇺🇸 United States' :
+                    dbService.selectedCountry == 'IN' ? '🇮🇳 India' :
+                    dbService.selectedCountry == 'GB' ? '🇬🇧 United Kingdom' :
+                    dbService.selectedCountry == 'CA' ? '🇨🇦 Canada' : '🇦🇺 Australia',
                     style: const TextStyle(color: AppTheme.textSecondary, fontSize: 12),
                   ),
+                  onTap: () => _showRegionPicker(context, dbService, tmdbService),
                 ),
                 _divider(),
                 _actiontile(
-                  icon: Icons.logout_rounded,
-                  label: 'Sign Out Account',
+                  icon: Icons.subtitles_outlined,
+                  label: 'Subtitles Multiplier',
+                  trailing: Text(
+                    dbService.captionSizeMultiplier == 0.8 ? 'Small (80%)' :
+                    dbService.captionSizeMultiplier == 1.0 ? 'Medium (100%)' :
+                    dbService.captionSizeMultiplier == 1.3 ? 'Large (130%)' : 'X-Large (160%)',
+                    style: const TextStyle(color: AppTheme.textSecondary, fontSize: 12),
+                  ),
+                  onTap: () => _showSubtitleSettings(context, dbService),
+                ),
+                _divider(),
+                _actiontile(
+                  icon: Icons.hd_rounded,
+                  label: 'Default Video Quality',
+                  trailing: Text(dbService.defaultQuality, style: const TextStyle(color: AppTheme.textSecondary, fontSize: 12)),
+                  onTap: () => _showQualitySettings(context, dbService),
+                ),
+                _divider(),
+                _actiontile(
+                  icon: Icons.speed_rounded,
+                  label: 'Playback Speed Rate',
+                  trailing: Text('${dbService.playbackSpeed}x', style: const TextStyle(color: AppTheme.textSecondary, fontSize: 12)),
+                  onTap: () => _showSpeedSettings(context, dbService),
+                ),
+                _divider(),
+                _switchTile(
+                  icon: Icons.play_circle_outline_rounded,
+                  label: 'Auto-play Next Episodes',
+                  value: dbService.autoPlayNext,
+                  onChanged: (v) => dbService.toggleAutoPlay(v),
+                ),
+              ]).animate().fade(duration: 500.ms, delay: 150.ms).slideY(begin: 0.1, end: 0, curve: Curves.easeOutQuad),
+
+              const SizedBox(height: 20),
+
+              _sectionLabel('Notifications & Alerts'),
+              _settingsCard([
+                _switchTile(
+                  icon: Icons.notifications_rounded,
+                  label: 'New Release Alerts',
+                  value: dbService.notifNewRelease,
+                  onChanged: (v) => dbService.toggleNotifNewRelease(v),
+                ),
+                _divider(),
+                _switchTile(
+                  icon: Icons.local_activity_rounded,
+                  label: 'Trending Content Alerts',
+                  value: dbService.notifTrending,
+                  onChanged: (v) => dbService.toggleNotifTrending(v),
+                ),
+              ]).animate().fade(duration: 550.ms, delay: 200.ms).slideY(begin: 0.1, end: 0, curve: Curves.easeOutQuad),
+
+              const SizedBox(height: 20),
+
+              _sectionLabel('Premium License'),
+              _premiumCard(context, dbService).animate().fade(duration: 600.ms, delay: 250.ms).slideY(begin: 0.1, end: 0, curve: Curves.easeOutQuad),
+
+              const SizedBox(height: 20),
+
+              _sectionLabel('Storage Operations'),
+              _settingsCard([
+                _actiontile(
+                  icon: Icons.delete_sweep_rounded,
+                  label: 'Clear TMDB Cache Box',
+                  color: AppTheme.accent,
+                  onTap: () => _clearCache(context, tmdbService),
+                ),
+                _divider(),
+                _actiontile(
+                  icon: Icons.video_label_rounded,
+                  label: 'Delete All Offline Downloads',
+                  color: Colors.orangeAccent,
+                  onTap: () => _purgeAllDownloads(context, dbService),
+                ),
+                _divider(),
+                _actiontile(
+                  icon: Icons.playlist_remove_rounded,
+                  label: 'Reset Profile Watchlist & History',
                   color: Colors.redAccent,
-                  onTap: () {
-                    dbService.logout();
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('Signed out successfully.')),
+                  onTap: () async {
+                    final confirmed = await showDialog<bool>(
+                      context: context,
+                      builder: (ctx) => AlertDialog(
+                        backgroundColor: AppTheme.surface,
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                        title: const Text('Reset Everything', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                        content: const Text(
+                          'This will delete your watchlist, history list, and stats for this profile permanently. Local downloads remain untouched.',
+                          style: TextStyle(color: AppTheme.textSecondary, fontSize: 13, height: 1.4),
+                        ),
+                        actions: [
+                          TextButton(
+                            onPressed: () => Navigator.pop(ctx, false),
+                            child: const Text('Cancel', style: TextStyle(color: AppTheme.textSecondary)),
+                          ),
+                          TextButton(
+                            onPressed: () => Navigator.pop(ctx, true),
+                            child: const Text('Reset All', style: TextStyle(color: Colors.redAccent, fontWeight: FontWeight.bold)),
+                          ),
+                        ],
+                      ),
                     );
+                    if (confirmed == true && context.mounted) {
+                      dbService.clearDatabase();
+                      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Watch preferences and stats reset.')));
+                    }
                   },
                 ),
-              ] else ...[
-                _actiontile(
-                  icon: Icons.login_rounded,
-                  label: 'Sign In / Register Account',
-                  color: AppTheme.accent,
-                  onTap: () => Navigator.push(
-                    context,
-                    MaterialPageRoute(builder: (_) => const LoginScreen(showSkipButton: false)),
-                  ),
+              ]).animate().fade(duration: 650.ms, delay: 300.ms).slideY(begin: 0.1, end: 0, curve: Curves.easeOutQuad),
+
+              const SizedBox(height: 20),
+
+              _sectionLabel('About CineSync'),
+              _settingsCard([
+                _infotile(
+                  icon: Icons.info_outline_rounded,
+                  label: 'App Release Version',
+                  trailing: const Text('2.0.0 Premium', style: TextStyle(color: AppTheme.textSecondary, fontSize: 12, fontWeight: FontWeight.bold)),
                 ),
-                const Padding(
-                  padding: EdgeInsets.fromLTRB(16, 4, 16, 14),
-                  child: Text(
-                    'Unlock cross-device sync of watchlist, watch history progress, and offline settings preferences.',
-                    style: TextStyle(color: AppTheme.textSecondary, fontSize: 11, height: 1.4),
-                  ),
+                _divider(),
+                _infotile(
+                  icon: Icons.movie_filter_rounded,
+                  label: 'API Core Platform',
+                  trailing: const Text('TMDB V3 Engine', style: TextStyle(color: AppTheme.textSecondary, fontSize: 12)),
                 ),
-              ],
-            ]).animate().fade(duration: 350.ms).slideY(begin: 0.1, end: 0, curve: Curves.easeOutQuad),
-
-            const SizedBox(height: 20),
-
-            // ─── Statistics Grid (Real Stats Panel) ────────
-            _sectionLabel('Device & App Statistics'),
-            GridView.count(
-              shrinkWrap: true,
-              physics: const NeverScrollableScrollPhysics(),
-              crossAxisCount: 2,
-              childAspectRatio: 1.6,
-              crossAxisSpacing: 10,
-              mainAxisSpacing: 10,
-              children: [
-                _statCard(
-                  title: 'Offline Files',
-                  value: _isLoadingMetrics ? "..." : _downloadsSize,
-                  subtitle: '${dbService.downloads.length} items saved',
-                  icon: Icons.download_done_rounded,
-                  iconColor: AppTheme.accent,
+                _divider(),
+                _infotile(
+                  icon: Icons.copyright_rounded,
+                  label: 'Build Status',
+                  trailing: const Text('Clean Sandbox', style: TextStyle(color: AppTheme.textSecondary, fontSize: 12)),
                 ),
-                _statCard(
-                  title: 'TMDB Cache Box',
-                  value: _isLoadingMetrics ? "..." : _cacheSize,
-                  subtitle: 'Local API Store',
-                  icon: Icons.storage_rounded,
-                  iconColor: AppTheme.secondaryAccent,
-                ),
-                _statCard(
-                  title: 'Watch Duration',
-                  value: '${dbService.totalHoursWatched} Hours',
-                  subtitle: 'Recorded playback',
-                  icon: Icons.hourglass_empty_rounded,
-                  iconColor: Colors.blueAccent,
-                ),
-                _statCard(
-                  title: 'Watchlist Storage',
-                  value: '${dbService.watchlist.length} Titles',
-                  subtitle: 'Saved for later',
-                  icon: Icons.bookmark_added_rounded,
-                  iconColor: Colors.pinkAccent,
-                ),
-              ],
-            ).animate().fade(duration: 400.ms, delay: 50.ms).slideY(begin: 0.1, end: 0, curve: Curves.easeOutQuad),
+              ]).animate().fade(duration: 700.ms, delay: 350.ms).slideY(begin: 0.1, end: 0, curve: Curves.easeOutQuad),
 
-            const SizedBox(height: 20),
-
-            // ─── Profile Selection ─────────────────────────
-            _sectionLabel('Active User Profile'),
-            _settingsCard([
-              Padding(
-                padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 16),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                  children: dbService.profiles.map((profile) {
-                    final isCurrent = dbService.currentProfile == profile;
-                    Color profileColor = Colors.purpleAccent;
-                    if (profile == 'Family') profileColor = Colors.blueAccent;
-                    if (profile == 'Kids') profileColor = Colors.greenAccent;
-
-                    return GestureDetector(
-                      onTap: () {
-                        dbService.selectProfile(profile);
-                        _loadMetrics();
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(content: Text('Switched profile to: $profile')),
-                        );
-                      },
-                      child: AnimatedOpacity(
-                        opacity: isCurrent ? 1.0 : 0.5,
-                        duration: const Duration(milliseconds: 250),
-                        child: Column(
-                          children: [
-                            AnimatedContainer(
-                              duration: const Duration(milliseconds: 250),
-                              padding: EdgeInsets.all(isCurrent ? 3 : 0),
-                              decoration: BoxDecoration(
-                                shape: BoxShape.circle,
-                                border: Border.all(
-                                  color: isCurrent ? profileColor : Colors.transparent,
-                                  width: 2,
-                                ),
-                              ),
-                              child: CircleAvatar(
-                                radius: 24,
-                                backgroundColor: profileColor.withValues(alpha: 0.25),
-                                child: Text(
-                                  profile.substring(0, 1),
-                                  style: TextStyle(color: profileColor, fontSize: 18, fontWeight: FontWeight.bold),
-                                ),
-                              ),
-                            ),
-                            const SizedBox(height: 6),
-                            Text(
-                              profile,
-                              style: TextStyle(
-                                color: isCurrent ? Colors.white : AppTheme.textSecondary,
-                                fontSize: 11,
-                                fontWeight: isCurrent ? FontWeight.bold : FontWeight.normal,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    );
-                  }).toList(),
-                ),
-              ),
-            ]).animate().fade(duration: 450.ms, delay: 100.ms).slideY(begin: 0.1, end: 0, curve: Curves.easeOutQuad),
-
-            const SizedBox(height: 20),
-
-            // ─── Playback settings ─────────────────────────
-            _sectionLabel('Streaming settings'),
-            _settingsCard([
-              _actiontile(
-                icon: Icons.language_rounded,
-                label: 'Streaming Region',
-                trailing: Text(
-                  dbService.selectedCountry == 'US' ? '🇺🇸 United States' :
-                  dbService.selectedCountry == 'IN' ? '🇮🇳 India' :
-                  dbService.selectedCountry == 'GB' ? '🇬🇧 United Kingdom' :
-                  dbService.selectedCountry == 'CA' ? '🇨🇦 Canada' : '🇦🇺 Australia',
-                  style: const TextStyle(color: AppTheme.textSecondary, fontSize: 12),
-                ),
-                onTap: () => _showRegionPicker(context, dbService, tmdbService),
-              ),
-              _divider(),
-              _actiontile(
-                icon: Icons.subtitles_outlined,
-                label: 'Subtitles Multiplier',
-                trailing: Text(
-                  dbService.captionSizeMultiplier == 0.8 ? 'Small (80%)' :
-                  dbService.captionSizeMultiplier == 1.0 ? 'Medium (100%)' :
-                  dbService.captionSizeMultiplier == 1.3 ? 'Large (130%)' : 'X-Large (160%)',
-                  style: const TextStyle(color: AppTheme.textSecondary, fontSize: 12),
-                ),
-                onTap: () => _showSubtitleSettings(context, dbService),
-              ),
-              _divider(),
-              _actiontile(
-                icon: Icons.hd_rounded,
-                label: 'Default Video Quality',
-                trailing: Text(dbService.defaultQuality, style: const TextStyle(color: AppTheme.textSecondary, fontSize: 12)),
-                onTap: () => _showQualitySettings(context, dbService),
-              ),
-              _divider(),
-              _actiontile(
-                icon: Icons.speed_rounded,
-                label: 'Playback Speed Rate',
-                trailing: Text('${dbService.playbackSpeed}x', style: const TextStyle(color: AppTheme.textSecondary, fontSize: 12)),
-                onTap: () => _showSpeedSettings(context, dbService),
-              ),
-              _divider(),
-              _switchTile(
-                icon: Icons.play_circle_outline_rounded,
-                label: 'Auto-play Next Episodes',
-                value: dbService.autoPlayNext,
-                onChanged: (v) => dbService.toggleAutoPlay(v),
-              ),
-            ]).animate().fade(duration: 500.ms, delay: 150.ms).slideY(begin: 0.1, end: 0, curve: Curves.easeOutQuad),
-
-            const SizedBox(height: 20),
-
-            // ─── Alerts Preferences ────────────────────────
-            _sectionLabel('Notifications & Alerts'),
-            _settingsCard([
-              _switchTile(
-                icon: Icons.notifications_rounded,
-                label: 'New Release Alerts',
-                value: dbService.notifNewRelease,
-                onChanged: (v) => dbService.toggleNotifNewRelease(v),
-              ),
-              _divider(),
-              _switchTile(
-                icon: Icons.local_activity_rounded,
-                label: 'Trending Content Alerts',
-                value: dbService.notifTrending,
-                onChanged: (v) => dbService.toggleNotifTrending(v),
-              ),
-            ]).animate().fade(duration: 550.ms, delay: 200.ms).slideY(begin: 0.1, end: 0, curve: Curves.easeOutQuad),
-
-            const SizedBox(height: 20),
-
-            // ─── Premium Membership card ──────────────────
-            _sectionLabel('Premium License'),
-            _premiumCard(context, dbService).animate().fade(duration: 600.ms, delay: 250.ms).slideY(begin: 0.1, end: 0, curve: Curves.easeOutQuad),
-
-            const SizedBox(height: 20),
-
-            // ─── Storage Operations ───────────────────────
-            _sectionLabel('Storage Operations'),
-            _settingsCard([
-              _actiontile(
-                icon: Icons.delete_sweep_rounded,
-                label: 'Clear TMDB Cache Box',
-                color: AppTheme.accent,
-                onTap: () => _clearCache(context, tmdbService),
-              ),
-              _divider(),
-              _actiontile(
-                icon: Icons.video_label_rounded,
-                label: 'Delete All Offline Downloads',
-                color: Colors.orangeAccent,
-                onTap: () => _purgeAllDownloads(context, dbService),
-              ),
-              _divider(),
-              _actiontile(
-                icon: Icons.playlist_remove_rounded,
-                label: 'Reset Profile Watchlist & History',
-                color: Colors.redAccent,
-                onTap: () async {
-                  final confirmed = await showDialog<bool>(
-                    context: context,
-                    builder: (ctx) => AlertDialog(
-                      backgroundColor: AppTheme.surface,
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                      title: const Text('Reset Everything', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-                      content: const Text(
-                        'This will delete your watchlist, history list, and stats for this profile permanently. Local downloads remain untouched.',
-                        style: TextStyle(color: AppTheme.textSecondary, fontSize: 13, height: 1.4),
-                      ),
-                      actions: [
-                        TextButton(
-                          onPressed: () => Navigator.pop(ctx, false),
-                          child: const Text('Cancel', style: TextStyle(color: AppTheme.textSecondary)),
-                        ),
-                        TextButton(
-                          onPressed: () => Navigator.pop(ctx, true),
-                          child: const Text('Reset All', style: TextStyle(color: Colors.redAccent, fontWeight: FontWeight.bold)),
-                        ),
-                      ],
-                    ),
-                  );
-                  if (confirmed == true && context.mounted) {
-                    dbService.clearDatabase();
-                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Watch preferences and stats reset.')));
-                  }
-                },
-              ),
-            ]).animate().fade(duration: 650.ms, delay: 300.ms).slideY(begin: 0.1, end: 0, curve: Curves.easeOutQuad),
-
-            const SizedBox(height: 20),
-
-            // ─── About Info ───────────────────────────────
-            _sectionLabel('About CineSync'),
-            _settingsCard([
-              _infotile(
-                icon: Icons.info_outline_rounded,
-                label: 'App Release Version',
-                trailing: const Text('2.0.0 Premium', style: TextStyle(color: AppTheme.textSecondary, fontSize: 12, fontWeight: FontWeight.bold)),
-              ),
-              _divider(),
-              _infotile(
-                icon: Icons.movie_filter_rounded,
-                label: 'API Core Platform',
-                trailing: const Text('TMDB V3 Engine', style: TextStyle(color: AppTheme.textSecondary, fontSize: 12)),
-              ),
-              _divider(),
-              _infotile(
-                icon: Icons.copyright_rounded,
-                label: 'Build Status',
-                trailing: const Text('Clean Sandbox', style: TextStyle(color: AppTheme.textSecondary, fontSize: 12)),
-              ),
-            ]).animate().fade(duration: 700.ms, delay: 350.ms).slideY(begin: 0.1, end: 0, curve: Curves.easeOutQuad),
-
-            const SizedBox(height: 80),
-          ],
+              const SizedBox(height: 80),
+            ],
+          ),
         ),
       ),
     );
@@ -670,11 +668,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     shape: BoxShape.circle,
                     boxShadow: value
                         ? [
-                            BoxShadow(
-                              color: AppTheme.accent.withValues(alpha: 0.5),
-                              blurRadius: 4,
-                            )
-                          ]
+                      BoxShadow(
+                        color: AppTheme.accent.withValues(alpha: 0.5),
+                        blurRadius: 4,
+                      )
+                    ]
                         : null,
                   ),
                 ),
@@ -787,6 +785,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
+  // NOTE: This remains a clearly-labeled sandbox/simulator flow, not a real
+  // payment integration. To wire up real purchases, swap the body of the
+  // "Authorize Sandbox Purchase" onPressed below for the `in_app_purchase`
+  // package's `buyNonConsumable`/`buyConsumable` call, backed by product IDs
+  // configured in Google Play Console / App Store Connect — that setup lives
+  // in your own store accounts, so it has to happen on your end before code
+  // here can point at it.
   void _showCheckoutSheet(BuildContext context, DatabaseService dbService) {
     bool isProcessing = false;
     bool isSuccess = false;
@@ -796,7 +801,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       backgroundColor: AppTheme.surface,
       isScrollControlled: true,
       shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
-      builder: (context) {
+      builder: (sheetContext) {
         return StatefulBuilder(builder: (context, setModalState) {
           return Padding(
             padding: EdgeInsets.only(
@@ -837,6 +842,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       onPressed: () {
                         setModalState(() => isProcessing = true);
                         Future.delayed(const Duration(seconds: 2), () {
+                          if (!sheetContext.mounted) return;
                           setModalState(() {
                             isProcessing = false;
                             isSuccess = true;
