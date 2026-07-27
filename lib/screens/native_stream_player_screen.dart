@@ -21,6 +21,9 @@ class NativeStreamPlayerScreen extends StatefulWidget {
   final List<dynamic> seasons;
   final bool isOffline;
   final String? localFilePath;
+  final String? posterPath;  // ← ADD THIS
+
+
 
   const NativeStreamPlayerScreen({
     super.key,
@@ -32,6 +35,9 @@ class NativeStreamPlayerScreen extends StatefulWidget {
     this.seasons = const [],
     this.isOffline = false,
     this.localFilePath,
+    this.posterPath,  // ← ADD THIS
+
+
   });
 
   @override
@@ -58,6 +64,7 @@ class _NativeStreamPlayerScreenState extends State<NativeStreamPlayerScreen>
   bool _isControlsVisible     = true;
   bool _isLocked              = false;
   bool _isEpisodePanelVisible = false;
+  double _playbackSpeed = 1.0;  // ← ADD THIS
 
   // Timers
   Timer? _controlsTimer;
@@ -67,6 +74,7 @@ class _NativeStreamPlayerScreenState extends State<NativeStreamPlayerScreen>
   Timer? _videoDetectionTimer;
 
   // Gesture overlays
+
   double _brightness            = 0.5;
   double _volume                = 1.0;
   bool   _showBrightnessOverlay = false;
@@ -195,8 +203,7 @@ class _NativeStreamPlayerScreenState extends State<NativeStreamPlayerScreen>
     super.initState();
     WidgetsBinding.instance.addObserver(this);
 
-    _miniPlayerService = MiniPlayerService();
-
+    _miniPlayerService = Provider.of<MiniPlayerService>(context, listen: false);
     _currentSeason  = widget.season;
     _currentEpisode = widget.episode;
     _calculateEpisodeCount();
@@ -310,20 +317,46 @@ class _NativeStreamPlayerScreenState extends State<NativeStreamPlayerScreen>
     }
   }
 
+// ✅ FIXED CODE - pass actual poster from DetailsScreen
   void _addToHistory() {
     if (!mounted) return;
     Provider.of<DatabaseService>(context, listen: false).addToHistory(
       {
         'id': widget.id,
         'title': widget.title,
-        'poster_path': null,
+        'poster_path': widget.posterPath,  // ← Now available!
         'media_type': widget.mediaType,
       },
       season:  widget.mediaType == 'tv' ? _currentSeason  : null,
       episode: widget.mediaType == 'tv' ? _currentEpisode : null,
     );
   }
+// Add this helper method to get poster path
+  String? _getPosterPath() {
+    // Check if we have a local file path (offline content)
+    if (widget.localFilePath != null) {
+      // For offline content, try to get poster from downloads
+      final db = Provider.of<DatabaseService>(context, listen: false);
+      final download = db.downloads.where((d) => d['id'] == widget.id).firstOrNull;
+      if (download != null && download['poster_path'] != null) {
+        return download['poster_path'] as String?;
+      }
+    }
 
+    // For online content, try to get from watchlist or TMDB cache
+    final db = Provider.of<DatabaseService>(context, listen: false);
+
+    // Check watchlist first
+    final watchlistItem = db.watchlist.where((w) => w['id'] == widget.id).firstOrNull;
+    if (watchlistItem != null && watchlistItem['poster_path'] != null) {
+      return watchlistItem['poster_path'] as String?;
+    }
+
+    // If you have a TMDB service instance, you could fetch details here
+    // But for now, return null as fallback
+    debugPrint('⚠️ Could not find poster for: ${widget.title} (ID: ${widget.id})');
+    return null;
+  }
   // ── Mirror helpers ─────────────────────────────────────────────────────────
   String _mirrorUrl(int index) {
     if (_mirrors.isEmpty) return '';
@@ -646,24 +679,49 @@ class _NativeStreamPlayerScreenState extends State<NativeStreamPlayerScreen>
 
   void _togglePlayPause() {
     if (_isNativeMode) {
-      _player.playOrPause();
+      if (_player.state.playing) {
+        _player.pause();
+      } else {
+        _player.play();
+      }
     } else {
       _webController?.evaluateJavascript(
-          source:
-          'var v=document.querySelector("video");if(v){v.paused?v.play():v.pause();}');
+          source: 'var v=document.querySelector("video");if(v){v.paused?v.play():v.pause();}');
     }
   }
-
   void _toggleEpisodePanel() {
     setState(() => _isEpisodePanelVisible = !_isEpisodePanelVisible);
     _isEpisodePanelVisible
         ? _episodePanelController.forward()
         : _episodePanelController.reverse();
   }
+  void _showSpeedDialog() {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppTheme.surface,
+        title: const Text('Playback Speed', style: TextStyle(color: Colors.white)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [0.5, 0.75, 1.0, 1.25, 1.5, 2.0].map((speed) {
+            return ListTile(
+              dense: true,
+              title: Text('${speed}x', style: TextStyle(color: _playbackSpeed == speed ? AppTheme.accent : Colors.white70, fontSize: 14)),
+              trailing: _playbackSpeed == speed ? Icon(Icons.check, color: AppTheme.accent, size: 20) : null,
+              onTap: () {
+                _player.setRate(speed);
+                setState(() => _playbackSpeed = speed);
+                Navigator.pop(ctx);
+              },
+            );
+          }).toList(),
+        ),
+      ),
+    );
+  }
 
   // ── FIX: Stop playback and close properly ──────────────────────────────────
   void _stopPlaybackAndClose() {
-    // Save progress before stopping
     _saveProgress();
 
     // Stop the native player if active
@@ -686,9 +744,6 @@ class _NativeStreamPlayerScreenState extends State<NativeStreamPlayerScreen>
     _progressTimer?.cancel();
     _resizeDebounce?.cancel();
 
-    // Close mini player if active
-    _miniPlayerService.close();
-
     // Reset system UI
     SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
@@ -701,36 +756,11 @@ class _NativeStreamPlayerScreenState extends State<NativeStreamPlayerScreen>
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.paused || state == AppLifecycleState.inactive) {
-      if (_isNativeMode && _streamUrl != null && !_isResolving) {
-        _miniPlayerService.startMiniPlayer(
-          title: widget.mediaType == 'tv'
-              ? '${widget.title} S${widget.season}E${widget.episode}'
-              : widget.title,
-          streamUrl: _streamUrl!,
-          mediaType: widget.mediaType,
-          season: widget.season,
-          episode: widget.episode,
-          tmdbId: widget.id,
-          position: _player.state.position,
-          duration: _player.state.duration,
-        );
-      } else if (!_isNativeMode && _streamUrl != null && !_isResolving) {
-        _miniPlayerService.startMiniPlayer(
-          title: widget.mediaType == 'tv'
-              ? '${widget.title} S${widget.season}E${widget.episode}'
-              : widget.title,
-          streamUrl: _streamUrl!,
-          mediaType: widget.mediaType,
-          season: widget.season,
-          episode: widget.episode,
-          tmdbId: widget.id,
-          position: Duration.zero,
-          duration: Duration.zero,
-        );
-      }
-
+      // Activate mini player when app goes to background (like YouTube)
+      _startMiniPlayer();
       try { SimplePip().enterPipMode(); } catch (_) {}
     } else if (state == AppLifecycleState.resumed) {
+      // Stop mini player when returning to app
       if (_miniPlayerService.isMiniPlayerActive) {
         _miniPlayerService.stopMiniPlayer();
       }
@@ -759,7 +789,7 @@ class _NativeStreamPlayerScreenState extends State<NativeStreamPlayerScreen>
     _controlsAnimController.dispose();
     _episodePanelController.dispose();
     _player.dispose();
-    _miniPlayerService.close();
+    // DO NOT close mini player service - managed by Provider
     SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
     try { ScreenBrightness().resetScreenBrightness(); } catch (_) {}
@@ -779,98 +809,100 @@ class _NativeStreamPlayerScreenState extends State<NativeStreamPlayerScreen>
       );
     }
   }
+  /// Activates mini player with current playback state
+  void _startMiniPlayer() {
+    if (_streamUrl == null || _isResolving || _isUnavailable) {
+      debugPrint('❌ Cannot start mini player: stream=$_streamUrl, resolving=$_isResolving, unavailable=$_isUnavailable');
+      return;
+    }
 
+    final title = widget.mediaType == 'tv'
+        ? '${widget.title} S$_currentSeason E$_currentEpisode'
+        : widget.title;
+
+    debugPrint('🎵 _startMiniPlayer CALLED');
+    debugPrint('   Title: $title');
+    debugPrint('   Stream URL: $_streamUrl');
+    debugPrint('   Service instance: ${_miniPlayerService.hashCode}');
+    debugPrint('   Before - isActive: ${_miniPlayerService.isMiniPlayerActive}');
+
+    _miniPlayerService.startMiniPlayer(
+
+      title: title,
+      streamUrl: _streamUrl!,
+      mediaType: widget.mediaType,
+      season: _currentSeason,
+      episode: _currentEpisode,
+      tmdbId: widget.id,
+      posterPath: widget.posterPath,
+      position: _isNativeMode ? _player.state.position : Duration.zero,
+      duration: _isNativeMode ? _player.state.duration : Duration.zero,
+    );
+
+    debugPrint('   After - isActive: ${_miniPlayerService.isMiniPlayerActive}');
+  }
   // ── Build ──────────────────────────────────────────────────────────────────
   @override
   Widget build(BuildContext context) {
     return WillPopScope(
       onWillPop: () async {
-        if ((_isNativeMode || !_isNativeMode) && _streamUrl != null && !_isResolving && !_isUnavailable) {
-          _miniPlayerService.startMiniPlayer(
-            title: widget.mediaType == 'tv'
-                ? '${widget.title} S${widget.season}E${widget.episode}'
-                : widget.title,
-            streamUrl: _streamUrl!,
-            mediaType: widget.mediaType,
-            season: widget.season,
-            episode: widget.episode,
-            tmdbId: widget.id,
-            position: _isNativeMode ? _player.state.position : Duration.zero,
-            duration: _isNativeMode ? _player.state.duration : Duration.zero,
-          );
-        }
-
         SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
         SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
         return true;
       },
       child: Scaffold(
         backgroundColor: Colors.black,
-        body: Stack(children: [
-
-          SizedBox.expand(child: _buildVideoArea()),
-
-          if (_isNativeMode && !_isResolving && !_isUnavailable)
-            _buildGestureLayer(),
-
-          if (_isResolving) _buildResolvingOverlay(),
-
-          if (_isUnavailable) _buildUnavailableOverlay(),
-
-          if (!_isLocked && !_isResolving && !_isUnavailable)
-            Positioned.fill(
-              child: FadeTransition(
-                opacity: _controlsFade,
-                child: SizedBox.expand(
-                    child: Stack(children: [_buildControlsOverlay()])),
+        body: Stack(
+          children: [
+            SizedBox.expand(child: _buildVideoArea()),
+            if (_isNativeMode && !_isResolving && !_isUnavailable) _buildGestureLayer(),
+            if (_isResolving) _buildResolvingOverlay(),
+            if (_isUnavailable) _buildUnavailableOverlay(),
+            if (!_isLocked && !_isResolving && !_isUnavailable)
+              Positioned.fill(
+                child: FadeTransition(
+                  opacity: _controlsFade,
+                  child: SizedBox.expand(child: Stack(children: [_buildControlsOverlay()])),
+                ),
               ),
-            ),
-
-          if (_isLocked) _buildLockIndicator(),
-
-          if (_showBrightnessOverlay)
-            Positioned(
-              left: 40, top: 0, bottom: 0,
-              child: Center(
-                  child: _buildSliderIndicator(
-                      Icons.brightness_6, _brightness, Colors.yellowAccent)),
-            ),
-          if (_showVolumeOverlay)
-            Positioned(
-              right: 40, top: 0, bottom: 0,
-              child: Center(
-                  child: _buildSliderIndicator(
-                      Icons.volume_up, _volume, Colors.white)),
-            ),
-
-          if (widget.mediaType == 'tv')
-            SlideTransition(
-              position: _episodePanelSlide,
-              child: Align(
-                  alignment: Alignment.bottomCenter,
-                  child: _buildEpisodePanel()),
-            ),
-
-          if (!_isNativeMode && !_isResolving && !_isUnavailable &&
-              !_isControlsVisible)
-            Positioned(
-              top: 44, left: 16,
-              child: _floatingPill(
-                onTap: _toggleControls,
-                color: Colors.black.withOpacity(0.72),
-                borderColor: Colors.white24,
-                child: const Row(mainAxisSize: MainAxisSize.min, children: [
-                  Icon(Icons.menu_rounded, color: Colors.white, size: 15),
-                  SizedBox(width: 6),
-                  Text('Menu',
-                      style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 12,
-                          fontWeight: FontWeight.w600)),
-                ]),
+            if (_isLocked) _buildLockIndicator(),
+            if (_showBrightnessOverlay)
+              Positioned(left: 40, top: 0, bottom: 0, child: Center(child: _buildSliderIndicator(Icons.brightness_6, _brightness, Colors.yellowAccent))),
+            if (_showVolumeOverlay)
+              Positioned(right: 40, top: 0, bottom: 0, child: Center(child: _buildSliderIndicator(Icons.volume_up, _volume, Colors.white))),
+            if (widget.mediaType == 'tv' && _isEpisodePanelVisible)
+              GestureDetector(
+                onTap: _toggleEpisodePanel,
+                child: Container(
+                  color: Colors.black54,
+                  child: SlideTransition(
+                    position: _episodePanelSlide,
+                    child: Align(
+                      alignment: Alignment.bottomCenter,
+                      child: GestureDetector(
+                        onTap: () {},
+                        child: _buildEpisodePanel(),
+                      ),
+                    ),
+                  ),
+                ),
               ),
-            ),
-        ]),
+            if (!_isNativeMode && !_isResolving && !_isUnavailable && !_isControlsVisible)
+              Positioned(
+                top: 44, left: 16,
+                child: _floatingPill(
+                  onTap: _toggleControls,
+                  color: Colors.black.withOpacity(0.72),
+                  borderColor: Colors.white24,
+                  child: const Row(mainAxisSize: MainAxisSize.min, children: [
+                    Icon(Icons.menu_rounded, color: Colors.white, size: 15),
+                    SizedBox(width: 6),
+                    Text('Menu', style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w600)),
+                  ]),
+                ),
+              ),
+          ],
+        ),
       ),
     );
   }
@@ -1314,7 +1346,7 @@ class _NativeStreamPlayerScreenState extends State<NativeStreamPlayerScreen>
                   IconButton(
                     icon: const Icon(Icons.arrow_back_ios_new_rounded,
                         color: Colors.white, size: 20),
-                    onPressed: _stopPlaybackAndClose, // FIXED: Use stop method
+                    onPressed: _stopPlaybackAndClose,
                   ),
                   Expanded(
                     child: Text(title,
@@ -1335,6 +1367,17 @@ class _NativeStreamPlayerScreenState extends State<NativeStreamPlayerScreen>
                           color: Colors.white70, size: 20),
                       onPressed: _toggleEpisodePanel,
                     ),
+                  // Mini Player button for WebView
+                  IconButton(
+                    icon: const Icon(Icons.picture_in_picture_alt_rounded,
+                        color: Colors.white70, size: 20),
+                    onPressed: () {
+                      _startMiniPlayer();
+                      // Navigate back so user can see the mini player
+                      if (mounted) Navigator.pop(context);
+                    },
+                    tooltip: 'Mini Player',
+                  ),
                 ]),
               ),
               if (_mirrors.isNotEmpty)
@@ -1381,7 +1424,7 @@ class _NativeStreamPlayerScreenState extends State<NativeStreamPlayerScreen>
                   IconButton(
                     icon: const Icon(Icons.arrow_back_ios_new_rounded,
                         color: Colors.white, size: 20),
-                    onPressed: _stopPlaybackAndClose, // FIXED: Use stop method
+                    onPressed: _stopPlaybackAndClose,
                   ),
                   const SizedBox(width: 2),
                   Expanded(
@@ -1431,6 +1474,24 @@ class _NativeStreamPlayerScreenState extends State<NativeStreamPlayerScreen>
                     icon: const Icon(Icons.screen_rotation_rounded,
                         color: Colors.white70, size: 20),
                     onPressed: _toggleOrientation,
+                  ),
+                  // Speed control button
+                  IconButton(
+                    icon: const Icon(Icons.speed_rounded,
+                        color: Colors.white70, size: 20),
+                    onPressed: _showSpeedDialog,
+                    tooltip: 'Playback Speed',
+                  ),
+                  // Mini Player button (like YouTube)
+                  // Mini Player button for WebView
+                  IconButton(
+                    icon: const Icon(Icons.picture_in_picture_alt_rounded,
+                        color: Colors.white70, size: 20),
+                    onPressed: () {
+                      _startMiniPlayer();
+                      if (mounted) Navigator.pop(context);
+                    },
+                    tooltip: 'Mini Player',
                   ),
                   IconButton(
                     icon: const Icon(Icons.picture_in_picture_alt,
@@ -1565,7 +1626,6 @@ class _NativeStreamPlayerScreenState extends State<NativeStreamPlayerScreen>
       ]),
     );
   }
-
   // ── Mirror pill ────────────────────────────────────────────────────────────
   Widget _buildMirrorPill(int i) {
     final sel    = i == _webMirrorIndex;
@@ -1726,99 +1786,218 @@ class _NativeStreamPlayerScreenState extends State<NativeStreamPlayerScreen>
   // ── Episode panel ──────────────────────────────────────────────────────────
   Widget _buildEpisodePanel() {
     return Container(
-      height: 260, width: double.infinity,
+      height: 320,
+      width: double.infinity,
       decoration: BoxDecoration(
-        color: const Color(0xF00D0D1A),
-        borderRadius:
-        const BorderRadius.vertical(top: Radius.circular(22)),
+        color: const Color(0xFF0D0D1A),
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(22)),
         border: Border.all(color: AppTheme.accent.withOpacity(0.3)),
         boxShadow: [
           BoxShadow(
-              color: Colors.black.withOpacity(0.6),
-              blurRadius: 20,
-              offset: const Offset(0, -4))
+            color: Colors.black.withOpacity(0.6),
+            blurRadius: 20,
+            offset: const Offset(0, -4),
+          ),
         ],
       ),
       child: Column(children: [
+        // Handle bar
         Container(
           margin: const EdgeInsets.symmetric(vertical: 10),
-          width: 36, height: 4,
+          width: 36,
+          height: 4,
           decoration: BoxDecoration(
-              color: Colors.white24,
-              borderRadius: BorderRadius.circular(2)),
+            color: Colors.white38,
+            borderRadius: BorderRadius.circular(2),
+          ),
         ),
+
+        // Header
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
+          child: Row(
+            children: [
+              Icon(Icons.tv_rounded, color: AppTheme.accent, size: 18),
+              const SizedBox(width: 8),
+              Text(
+                'Season $_currentSeason',
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              const Spacer(),
+              // Close button
+              Material(
+                color: Colors.white.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(12),
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(12),
+                  onTap: _toggleEpisodePanel,
+                  child: Padding(
+                    padding: const EdgeInsets.all(6),
+                    child: Icon(
+                      Icons.close_rounded,
+                      color: Colors.white54,
+                      size: 18,
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+
+        const SizedBox(height: 8),
+
+        // Season selector - horizontal chips
         if (widget.seasons.length > 1)
-          SizedBox(
-            height: 42,
+          Container(
+            height: 38,
+            margin: const EdgeInsets.only(bottom: 8),
             child: ListView.builder(
               scrollDirection: Axis.horizontal,
-              padding: const EdgeInsets.symmetric(horizontal: 14),
+              padding: const EdgeInsets.symmetric(horizontal: 16),
               itemCount: widget.seasons.length,
               itemBuilder: (_, i) {
-                final sn =
-                    (widget.seasons[i]['season_number'] as int?) ?? i + 1;
+                final sn = (widget.seasons[i]['season_number'] as int?) ?? i + 1;
                 final sel = sn == _currentSeason;
-                return GestureDetector(
-                  onTap: () => _switchSeason(sn),
-                  child: AnimatedContainer(
-                    duration: const Duration(milliseconds: 180),
-                    margin: const EdgeInsets.only(right: 8),
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 16, vertical: 8),
-                    decoration: BoxDecoration(
-                      color: sel ? AppTheme.accent : Colors.white10,
-                      borderRadius: BorderRadius.circular(16),
+                return Padding(
+                  padding: const EdgeInsets.only(right: 8),
+                  child: Material(
+                    color: sel ? AppTheme.accent : Colors.white.withOpacity(0.08),
+                    borderRadius: BorderRadius.circular(20),
+                    child: InkWell(
+                      borderRadius: BorderRadius.circular(20),
+                      onTap: () => _switchSeason(sn),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(20),
+                          border: Border.all(
+                            color: sel ? AppTheme.accent : Colors.white.withOpacity(0.15),
+                          ),
+                        ),
+                        child: Text(
+                          'Season $sn',
+                          style: TextStyle(
+                            color: sel ? Colors.black : Colors.white70,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
                     ),
-                    child: Text('Season $sn',
-                        style: TextStyle(
-                          color: sel ? Colors.black : Colors.white70,
-                          fontSize: 13,
-                          fontWeight: FontWeight.w600,
-                        )),
                   ),
                 );
               },
             ),
           ),
-        const SizedBox(height: 10),
+
+        // Episode count header
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
+          child: Row(
+            children: [
+              Text(
+                'EPISODES',
+                style: TextStyle(
+                  color: AppTheme.textSecondary,
+                  fontSize: 10,
+                  fontWeight: FontWeight.bold,
+                  letterSpacing: 1.2,
+                ),
+              ),
+              const SizedBox(width: 6),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                decoration: BoxDecoration(
+                  color: AppTheme.accent.withOpacity(0.15),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Text(
+                  '$_episodeCount',
+                  style: TextStyle(
+                    color: AppTheme.accent,
+                    fontSize: 10,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+
+        const SizedBox(height: 6),
+
+        // Episode grid
         Expanded(
           child: GridView.builder(
-            padding: const EdgeInsets.symmetric(horizontal: 14),
-            scrollDirection: Axis.horizontal,
-            gridDelegate:
-            const SliverGridDelegateWithFixedCrossAxisCount(
-              crossAxisCount: 2,
-              mainAxisSpacing: 8, crossAxisSpacing: 8,
-              childAspectRatio: 0.55,
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+              crossAxisCount: 4,
+              mainAxisSpacing: 8,
+              crossAxisSpacing: 8,
+              childAspectRatio: 1.2,
             ),
             itemCount: _episodeCount,
             itemBuilder: (_, i) {
-              final ep  = i + 1;
+              final ep = i + 1;
               final sel = ep == _currentEpisode;
               return GestureDetector(
                 onTap: () => _switchEpisode(ep),
                 child: AnimatedContainer(
-                  duration: const Duration(milliseconds: 180),
+                  duration: const Duration(milliseconds: 200),
                   decoration: BoxDecoration(
-                    color: sel ? AppTheme.accent : Colors.white10,
+                    color: sel
+                        ? AppTheme.accent
+                        : Colors.white.withOpacity(0.05),
                     borderRadius: BorderRadius.circular(10),
                     border: Border.all(
-                        color: sel ? AppTheme.accent : Colors.white12),
+                      color: sel
+                          ? AppTheme.accent
+                          : Colors.white.withOpacity(0.1),
+                      width: sel ? 2 : 1,
+                    ),
+                    boxShadow: sel
+                        ? [
+                      BoxShadow(
+                        color: AppTheme.accent.withOpacity(0.3),
+                        blurRadius: 8,
+                        offset: const Offset(0, 2),
+                      ),
+                    ]
+                        : null,
                   ),
-                  child: Center(
-                    child: Text('E$ep',
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Text(
+                        '$ep',
                         style: TextStyle(
-                          color: sel ? Colors.black : Colors.white70,
+                          color: sel ? Colors.black : Colors.white,
                           fontWeight: FontWeight.bold,
-                          fontSize: 13,
-                        )),
+                          fontSize: 18,
+                        ),
+                      ),
+                      Text(
+                        'Episode',
+                        style: TextStyle(
+                          color: sel ? Colors.black54 : Colors.white38,
+                          fontSize: 9,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ],
                   ),
                 ),
               );
             },
           ),
         ),
-        const SizedBox(height: 8),
+
+        const SizedBox(height: 12),
       ]),
     );
   }

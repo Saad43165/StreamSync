@@ -116,13 +116,15 @@ class DownloadsScreen extends StatelessWidget {
       context,
       MaterialPageRoute(
         builder: (_) => NativeStreamPlayerScreen(
-          id:        item['id'] as int,
-          title:     item['title'] ?? item['name'] ?? 'Untitled',
+          id: item['id'],
+          title: item['title'],
           mediaType: item['media_type'] ?? 'movie',
-          season:    1,
-          episode:   1,
-          seasons:   item['seasons'] as List<dynamic>? ?? const [],
+          season: item['season_number'] ?? 1,
+          episode: item['episode_number'] ?? 1,
+          seasons: item['seasons'] ?? [],
           isOffline: true,
+          localFilePath: item['local_file_path'],
+          posterPath: item['poster_path'],  // ← ADD THIS
         ),
       ),
     );

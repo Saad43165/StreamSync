@@ -658,6 +658,7 @@ class _DetailsScreenState extends State<DetailsScreen> with TickerProviderStateM
                   season: widget.mediaType == 'tv' ? _selectedSeason : null,
                   episode: widget.mediaType == 'tv' ? _selectedEpisode : null,
                 );
+// In details_screen.dart, find this navigation:
                 Navigator.push(
                   context,
                   MaterialPageRoute(
@@ -668,10 +669,11 @@ class _DetailsScreenState extends State<DetailsScreen> with TickerProviderStateM
                       season: _selectedSeason,
                       episode: _selectedEpisode,
                       seasons: details['seasons'] as List<dynamic>? ?? [],
+                      // ADD THIS:
+                      posterPath: details['poster_path'],  // ← Pass the poster from details
                     ),
                   ),
-                );
-              },
+                );              },
               child: Ink(
                 height: 58,
                 decoration: BoxDecoration(

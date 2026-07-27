@@ -9,7 +9,7 @@ import 'package:flutter_downloader/flutter_downloader.dart';
 import 'services/tmdb_service.dart';
 import 'services/database_service.dart';
 import 'services/download_service.dart';
-import 'services/mini_player_service.dart'; // NEW: Mini player service
+import 'services/mini_player_service.dart';
 import 'screens/home_screen.dart';
 import 'screens/search_screen.dart';
 import 'screens/watchlist_screen.dart';
@@ -30,7 +30,6 @@ void main() async {
       providers: [
         ChangeNotifierProvider(create: (_) => TMDBService()),
         ChangeNotifierProvider(create: (_) => DatabaseService()),
-        // NEW: Mini player service provider
         ChangeNotifierProvider(create: (_) => MiniPlayerService()),
         ChangeNotifierProxyProvider<DatabaseService, DownloadService>(
           create: (context) => DownloadService(dbService: Provider.of<DatabaseService>(context, listen: false)),
@@ -95,12 +94,20 @@ class _MainNavigationShellState extends State<MainNavigationShell> {
             children: _screens,
           ),
 
-          // NEW: Mini player widget (appears above bottom nav)
-          const Positioned(
-            bottom: 80, // Position above the bottom navigation bar
-            left: 12,
-            right: 12,
-            child: MiniPlayerWidget(),
+          // Mini player - only shows when active
+          Consumer<MiniPlayerService>(
+            builder: (context, miniPlayerService, child) {
+              if (!miniPlayerService.isMiniPlayerActive) {
+                return const SizedBox.shrink();
+              }
+
+              return Positioned(
+                bottom: 80, // Position above the bottom navigation bar
+                left: 12,
+                right: 12,
+                child: const MiniPlayerWidget(),
+              );
+            },
           ),
 
           // Floating Glassmorphic Bottom Navigation Dock

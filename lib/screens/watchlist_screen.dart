@@ -32,12 +32,12 @@ class WatchlistScreen extends StatelessWidget {
             : null,
       ),
       body: list.isEmpty
-          ? _buildEmptyState()
+          ? _buildEmptyState(context)
           : _buildWatchlistContent(context, list, dbService),
     );
   }
 
-  Widget _buildEmptyState() {
+  Widget _buildEmptyState(BuildContext context) {
     return Center(
       child: Padding(
         padding: const EdgeInsets.all(32),
@@ -76,23 +76,6 @@ class WatchlistScreen extends StatelessWidget {
                 height: 1.5,
               ),
             ),
-            const SizedBox(height: 24),
-            OutlinedButton.icon(
-              onPressed: () {
-                // Navigate to home/search tab
-                // This depends on your navigation setup
-              },
-              icon: const Icon(Icons.explore_outlined, size: 18),
-              label: const Text('Discover Content'),
-              style: OutlinedButton.styleFrom(
-                foregroundColor: AppTheme.accent,
-                side: BorderSide(color: AppTheme.accent.withOpacity(0.5)),
-                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
-                ),
-              ),
-            ),
           ],
         ),
       ),
@@ -103,7 +86,6 @@ class WatchlistScreen extends StatelessWidget {
       BuildContext context, List<dynamic> list, DatabaseService dbService) {
     return Column(
       children: [
-        // Header with count
         Padding(
           padding: const EdgeInsets.fromLTRB(20, 12, 20, 8),
           child: Row(
@@ -119,7 +101,6 @@ class WatchlistScreen extends StatelessWidget {
             ],
           ),
         ),
-        // List
         Expanded(
           child: ListView.builder(
             padding: const EdgeInsets.fromLTRB(16, 4, 16, 110),
@@ -164,8 +145,7 @@ class WatchlistScreen extends StatelessWidget {
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx),
-            child: const Text('Cancel',
-                style: TextStyle(color: AppTheme.textSecondary)),
+            child: const Text('Cancel', style: TextStyle(color: AppTheme.textSecondary)),
           ),
           TextButton(
             onPressed: () {
@@ -180,8 +160,6 @@ class WatchlistScreen extends StatelessWidget {
     );
   }
 }
-
-// ── Extracted Watchlist Card Widget ──────────────────────────────────────────
 
 class _WatchlistCard extends StatelessWidget {
   final Map<String, dynamic> item;
@@ -205,8 +183,6 @@ class _WatchlistCard extends StatelessWidget {
     final overview = item['overview'] ?? '';
     final season = item['season'];
     final episode = item['episode'];
-
-    // Build proper image URL
     final imageUrl = _buildImageUrl(posterPath);
 
     return Padding(
@@ -236,7 +212,6 @@ class _WatchlistCard extends StatelessWidget {
               padding: const EdgeInsets.all(12),
               child: Row(
                 children: [
-                  // Poster
                   ClipRRect(
                     borderRadius: BorderRadius.circular(10),
                     child: SizedBox(
@@ -252,108 +227,55 @@ class _WatchlistCard extends StatelessWidget {
                             color: Colors.white12,
                             child: const Center(
                               child: SizedBox(
-                                width: 20,
-                                height: 20,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                  color: AppTheme.accent,
-                                ),
+                                width: 20, height: 20,
+                                child: CircularProgressIndicator(strokeWidth: 2, color: AppTheme.accent),
                               ),
                             ),
                           ),
                           errorWidget: (_, __, ___) => Container(
                             color: Colors.white12,
-                            child: Icon(Icons.movie,
-                                color: Colors.white.withOpacity(0.3)),
+                            child: Icon(Icons.movie, color: Colors.white.withOpacity(0.3)),
                           ),
                           memCacheWidth: 112,
                         ),
                       )
                           : Container(
                         color: Colors.white12,
-                        child: Icon(Icons.movie,
-                            color: Colors.white.withOpacity(0.3)),
+                        child: Icon(Icons.movie, color: Colors.white.withOpacity(0.3)),
                       ),
                     ),
                   ),
-
                   const SizedBox(width: 14),
-
-                  // Info
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        // Title
-                        Text(
-                          title,
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                            fontWeight: FontWeight.bold,
-                            color: Colors.white,
-                            fontSize: 14,
-                            height: 1.3,
-                          ),
-                        ),
+                        Text(title, maxLines: 2, overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white, fontSize: 14, height: 1.3)),
                         const SizedBox(height: 6),
-
-                        // Badges row
                         Wrap(
-                          spacing: 8,
-                          runSpacing: 4,
+                          spacing: 8, runSpacing: 4,
                           children: [
-                            // Media type badge
-                            _Badge(
-                              text: mediaType.toUpperCase(),
-                              color: mediaType == 'tv'
-                                  ? Colors.blueAccent
-                                  : Colors.purpleAccent,
-                            ),
-
-                            // Rating
-                            if (ratingNum > 0)
-                              _Badge(
-                                text: '⭐ $rating',
-                                color: const Color(0xFFF5C842),
-                              ),
-
-                            // Season/Episode for TV
+                            _Badge(text: mediaType.toUpperCase(), color: mediaType == 'tv' ? Colors.blueAccent : Colors.purpleAccent),
+                            if (ratingNum > 0) _Badge(text: '⭐ $rating', color: const Color(0xFFF5C842)),
                             if (mediaType == 'tv' && season != null)
-                              _Badge(
-                                text: 'S$season${episode != null ? 'E$episode' : ''}',
-                                color: Colors.tealAccent,
-                              ),
+                              _Badge(text: 'S$season${episode != null ? 'E$episode' : ''}', color: Colors.tealAccent),
                           ],
                         ),
-
-                        // Overview preview
                         if (overview.isNotEmpty) ...[
                           const SizedBox(height: 6),
-                          Text(
-                            overview,
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
-                              color: AppTheme.textSecondary,
-                              fontSize: 11,
-                              height: 1.4,
-                            ),
-                          ),
+                          Text(overview, maxLines: 2, overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(color: AppTheme.textSecondary, fontSize: 11, height: 1.4)),
                         ],
                       ],
                     ),
                   ),
-
-                  // Delete button
                   IconButton(
-                    icon: const Icon(Icons.close_rounded,
-                        color: Colors.white38, size: 18),
+                    icon: const Icon(Icons.close_rounded, color: Colors.white38, size: 18),
                     onPressed: onDelete,
                     visualDensity: VisualDensity.compact,
                     padding: EdgeInsets.zero,
-                    constraints: const BoxConstraints(
-                        minWidth: 32, minHeight: 32),
+                    constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
                   ),
                 ],
               ),
@@ -369,19 +291,14 @@ class _WatchlistCard extends StatelessWidget {
     final path = posterPath.toString();
     if (path.isEmpty) return null;
     if (path.startsWith('http')) return path;
-    if (path.startsWith('/')) {
-      return 'https://image.tmdb.org/t/p/w200$path';
-    }
+    if (path.startsWith('/')) return 'https://image.tmdb.org/t/p/w200$path';
     return null;
   }
 }
 
-// ── Badge Widget ─────────────────────────────────────────────────────────────
-
 class _Badge extends StatelessWidget {
   final String text;
   final Color color;
-
   const _Badge({required this.text, required this.color});
 
   @override
@@ -393,15 +310,7 @@ class _Badge extends StatelessWidget {
         borderRadius: BorderRadius.circular(5),
         border: Border.all(color: color.withOpacity(0.3)),
       ),
-      child: Text(
-        text,
-        style: TextStyle(
-          fontSize: 10,
-          fontWeight: FontWeight.bold,
-          color: color,
-          letterSpacing: 0.3,
-        ),
-      ),
+      child: Text(text, style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: color, letterSpacing: 0.3)),
     );
   }
 }
