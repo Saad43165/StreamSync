@@ -10,6 +10,7 @@ import 'package:simple_pip_mode/simple_pip.dart';
 import '../theme/app_theme.dart';
 import '../services/stream_resolver_service.dart';
 import '../services/database_service.dart';
+import '../services/mini_player_service.dart';
 
 class NativeStreamPlayerScreen extends StatefulWidget {
   final int id;
@@ -63,7 +64,7 @@ class _NativeStreamPlayerScreenState extends State<NativeStreamPlayerScreen>
   Timer? _loadingTimeout;
   Timer? _resizeDebounce;
   Timer? _progressTimer;
-  Timer? _videoDetectionTimer; // NEW: Timer for detecting video playback
+  Timer? _videoDetectionTimer;
 
   // Gesture overlays
   double _brightness            = 0.5;
@@ -86,11 +87,14 @@ class _NativeStreamPlayerScreenState extends State<NativeStreamPlayerScreen>
   bool _webLoading          = false;
   int  _webMirrorIndex      = 0;
   bool _autoSwitchTriggered = false;
-  bool _videoPlayingDetected = false; // NEW: Flag to prevent auto-switching
+  bool _videoPlayingDetected = false;
   final Map<int, bool?> _mirrorHealth = {};
   Key  _webViewKey = UniqueKey();
 
   List<Map<String, String>> _mirrors = [];
+
+  // ── Mini Player Service ────────────────────────────────────────────────────
+  late final MiniPlayerService _miniPlayerService;
 
   // ── JavaScript ─────────────────────────────────────────────────────────────
 
@@ -121,7 +125,6 @@ class _NativeStreamPlayerScreenState extends State<NativeStreamPlayerScreen>
 })();
 ''';
 
-  // ENHANCED: More robust video playback watcher with fallback detection
   static const String _videoPlaybackWatcherScript = r'''
 (function() {
   if (window.__vpw) return;
@@ -139,7 +142,6 @@ class _NativeStreamPlayerScreenState extends State<NativeStreamPlayerScreen>
   function checkVideoStatus() {
     const videos = document.querySelectorAll('video');
     for (let v of videos) {
-      // Check if video is actually playing with content
       if (!v.paused && !v.ended && v.readyState > 2 && v.currentTime > 0) {
         notifyFlutter();
         return true;
@@ -153,7 +155,6 @@ class _NativeStreamPlayerScreenState extends State<NativeStreamPlayerScreen>
       if (v.__watched) return;
       v.__watched = true;
       
-      // Listen for various playback events
       ['playing', 'play', 'timeupdate', 'progress'].forEach(eventName => {
         v.addEventListener(eventName, function() {
           if (!v.paused && v.currentTime > 0) {
@@ -162,26 +163,22 @@ class _NativeStreamPlayerScreenState extends State<NativeStreamPlayerScreen>
         });
       });
       
-      // Also check if already playing
       if (!v.paused && !v.ended && v.readyState > 2 && v.currentTime > 0) {
         notifyFlutter();
       }
     });
   }
 
-  // Try immediately
   attachWatcher();
   if (checkVideoStatus()) return;
 
-  // Keep checking for 20 seconds with decreasing frequency
   let attempts = 0;
-  const maxAttempts = 40; // 20 seconds total
+  const maxAttempts = 40;
   const interval = setInterval(function() {
     attempts++;
     attachWatcher();
     if (checkVideoStatus() || attempts >= maxAttempts) {
       clearInterval(interval);
-      // If we still haven't detected video after 20s, report as failed
       if (!videoPlayingDetected && attempts >= maxAttempts && window.flutter_inappwebview) {
         window.flutter_inappwebview.callHandler('onVideoDetectionFailed');
       }
@@ -197,6 +194,9 @@ class _NativeStreamPlayerScreenState extends State<NativeStreamPlayerScreen>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+
+    _miniPlayerService = MiniPlayerService();
+
     _currentSeason  = widget.season;
     _currentEpisode = widget.episode;
     _calculateEpisodeCount();
@@ -241,7 +241,7 @@ class _NativeStreamPlayerScreenState extends State<NativeStreamPlayerScreen>
       _streamUrl       = null;
       _resolvingStatus = 'Looking for stream…';
       _webMirrorIndex  = 0;
-      _videoPlayingDetected = false; // Reset detection flag
+      _videoPlayingDetected = false;
       _mirrorHealth.clear();
     });
 
@@ -333,15 +333,13 @@ class _NativeStreamPlayerScreenState extends State<NativeStreamPlayerScreen>
 
   void _switchMirror(int index) {
     if (index == _webMirrorIndex && !_webLoading) return;
-
-    // Cancel any existing timers
     _loadingTimeout?.cancel();
     _videoDetectionTimer?.cancel();
 
     setState(() {
       _webMirrorIndex      = index;
       _webLoading          = true;
-      _videoPlayingDetected = false; // Reset detection flag
+      _videoPlayingDetected = false;
       _mirrorHealth[index] = null;
       _autoSwitchTriggered = false;
       _webViewKey          = UniqueKey();
@@ -349,29 +347,24 @@ class _NativeStreamPlayerScreenState extends State<NativeStreamPlayerScreen>
     _startWebLoadingTimeout();
   }
 
-  // ENHANCED: Smarter timeout with video detection polling
   void _startWebLoadingTimeout() {
     _loadingTimeout?.cancel();
     _videoDetectionTimer?.cancel();
     _autoSwitchTriggered = false;
     _videoPlayingDetected = false;
 
-    // Start the main timeout (45 seconds - increased from 30 for slow servers)
-    _loadingTimeout = Timer(const Duration(seconds: 45), () {
+    // Increased to 60s for slow embed players that load via iframes
+    _loadingTimeout = Timer(const Duration(seconds: 60), () {
       if (!mounted || _autoSwitchTriggered || _videoPlayingDetected) return;
-
-      // Double-check if video is playing before switching
       _checkVideoStatusBeforeSwitch();
     });
 
-    // Start periodic video detection checks
     _startVideoDetectionPolling();
   }
 
-  // NEW: Actively poll for video playback status
   void _startVideoDetectionPolling() {
     _videoDetectionTimer?.cancel();
-    _videoDetectionTimer = Timer.periodic(const Duration(seconds: 2), (timer) {
+    _videoDetectionTimer = Timer.periodic(const Duration(seconds: 3), (timer) {
       if (!mounted || _videoPlayingDetected || _webController == null) {
         timer.cancel();
         return;
@@ -382,64 +375,124 @@ class _NativeStreamPlayerScreenState extends State<NativeStreamPlayerScreen>
           var videos = document.querySelectorAll('video');
           for (var i = 0; i < videos.length; i++) {
             var v = videos[i];
-            if (!v.paused && !v.ended && v.readyState > 2 && v.currentTime > 0.5) {
-              return true;
+            // More lenient: accept readyState > 0 and playing
+            if (!v.paused && !v.ended && v.readyState > 0) {
+              return 'playing';
+            }
+            // Accept video that has loaded metadata
+            if (v.readyState >= 2 && v.duration > 0) {
+              return 'ready';
             }
           }
-          return false;
+          // Check for iframes (common in embed players)
+          var iframes = document.querySelectorAll('iframe');
+          if (iframes.length > 0) return 'hasIframe';
+          return 'none';
         })();
       ''').then((result) {
-        if (result == true && mounted && !_videoPlayingDetected) {
+        if (!mounted || _videoPlayingDetected) {
+          timer.cancel();
+          return;
+        }
+        // Accept playing, ready, or hasIframe states
+        if (result == 'playing' || result == 'ready' || result == 'hasIframe') {
           _onVideoPlayingDetected();
           timer.cancel();
         }
+      }).catchError((_) {
+        // Ignore polling errors
       });
     });
   }
 
-  // NEW: Check video status before switching mirrors
   void _checkVideoStatusBeforeSwitch() {
-    if (_webController == null || !mounted || _videoPlayingDetected) return;
+    if (_webController == null || !mounted || _videoPlayingDetected || _autoSwitchTriggered) return;
 
     _webController?.evaluateJavascript(source: r'''
       (function() {
         var videos = document.querySelectorAll('video');
         for (var i = 0; i < videos.length; i++) {
           var v = videos[i];
-          if (!v.paused && !v.ended && v.readyState > 2 && v.currentTime > 0) {
-            return 'playing';
-          }
+          // Check if video has any content loaded
           if (v.readyState > 0 && v.duration > 0) {
-            return 'loaded';
+            return 'hasVideo';
           }
+          if (v.readyState > 0) {
+            return 'loading';
+          }
+        }
+        // Check for iframes - many embed players use nested iframes
+        var iframes = document.querySelectorAll('iframe');
+        if (iframes.length > 0) {
+          return 'hasIframe';
+        }
+        // Check for any media-related elements
+        var mediaEls = document.querySelectorAll('[class*="player"], [id*="player"], [class*="video"], .jwplayer, .plyr');
+        if (mediaEls.length > 0) {
+          return 'hasPlayer';
         }
         return 'none';
       })();
     ''').then((status) {
-      if (!mounted || _videoPlayingDetected) return;
+      if (!mounted || _videoPlayingDetected || _autoSwitchTriggered) return;
 
-      if (status == 'playing') {
-        // Video is actually playing, don't switch!
-        _onVideoPlayingDetected();
-      } else if (status == 'loaded') {
-        // Video is loaded but not playing yet, give it more time
-        // Extend the timeout by 15 more seconds
+      // If page has ANY content (video, iframe, player element), don't switch
+      if (status == 'hasVideo' || status == 'loading' || status == 'hasIframe' || status == 'hasPlayer') {
+        // Page has media content - extend timeout and keep waiting
         _loadingTimeout?.cancel();
-        _loadingTimeout = Timer(const Duration(seconds: 15), () {
+        _loadingTimeout = Timer(const Duration(seconds: 20), () {
           if (!mounted || _videoPlayingDetected || _autoSwitchTriggered) return;
-          _switchToNextMirror();
+          _finalVideoCheck();
         });
       } else {
-        // No video found, switch to next mirror
+        // Truly no media content - safe to switch
         _switchToNextMirror();
       }
     }).catchError((_) {
-      if (!mounted || _videoPlayingDetected) return;
+      if (!mounted || _videoPlayingDetected || _autoSwitchTriggered) return;
+      // On error, give benefit of doubt and wait longer
+      _loadingTimeout?.cancel();
+      _loadingTimeout = Timer(const Duration(seconds: 15), () {
+        if (!mounted || _videoPlayingDetected || _autoSwitchTriggered) return;
+        _switchToNextMirror();
+      });
+    });
+  }
+  void _finalVideoCheck() {
+    if (_webController == null || !mounted || _videoPlayingDetected || _autoSwitchTriggered) return;
+
+    _webController?.evaluateJavascript(source: r'''
+      (function() {
+        var videos = document.querySelectorAll('video');
+        for (var i = 0; i < videos.length; i++) {
+          var v = videos[i];
+          if (!v.paused && !v.ended && v.currentTime > 0) {
+            return 'playing';
+          }
+        }
+        // Any video element at all?
+        if (videos.length > 0) return 'hasVideo';
+        // Any iframe?
+        if (document.querySelectorAll('iframe').length > 0) return 'hasIframe';
+        return 'none';
+      })();
+    ''').then((status) {
+      if (!mounted || _videoPlayingDetected || _autoSwitchTriggered) return;
+
+      if (status == 'playing' || status == 'hasVideo' || status == 'hasIframe') {
+        // Content exists - mark as playing detected
+        _onVideoPlayingDetected();
+      } else {
+        // Truly nothing - switch
+        _switchToNextMirror();
+      }
+    }).catchError((_) {
+      if (!mounted || _videoPlayingDetected || _autoSwitchTriggered) return;
       _switchToNextMirror();
     });
   }
 
-  // NEW: Handle video playing detection
+  // REPLACE this method:
   void _onVideoPlayingDetected() {
     if (!mounted || _videoPlayingDetected) return;
 
@@ -452,37 +505,42 @@ class _NativeStreamPlayerScreenState extends State<NativeStreamPlayerScreen>
       _mirrorHealth[_webMirrorIndex] = true;
     });
 
-    // Show success feedback
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-      content: Text(
-        '✓ ${_mirrors[_webMirrorIndex]["name"]} - Playing',
-        style: const TextStyle(color: Colors.white),
-      ),
-      backgroundColor: Colors.green.withOpacity(0.8),
-      duration: const Duration(seconds: 2),
-      behavior: SnackBarBehavior.floating,
-    ));
+    // FIXED: Change ScaffoldMessenger.of(context).mounted → mounted
+    if (mounted) {
+      ScaffoldMessenger.of(context).clearSnackBars();
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(
+          '✓ ${_mirrors.isNotEmpty ? _mirrors[_webMirrorIndex]["name"] : "Mirror"} - Playing',
+          style: const TextStyle(color: Colors.white),
+        ),
+        backgroundColor: Colors.green.withOpacity(0.8),
+        duration: const Duration(seconds: 2),
+        behavior: SnackBarBehavior.floating,
+      ));
+    }
   }
 
-  // NEW: Switch to next mirror with feedback
   void _switchToNextMirror() {
-    if (_autoSwitchTriggered || _videoPlayingDetected) return;
+    if (_autoSwitchTriggered || _videoPlayingDetected || _mirrors.isEmpty) return;
 
     final next = (_webMirrorIndex + 1) % _mirrors.length;
     _autoSwitchTriggered = true;
 
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-      content: Text(
-        '${_mirrors[_webMirrorIndex]["name"]} unavailable — trying ${_mirrors[next]["name"]}…',
-        style: const TextStyle(color: Colors.white),
-      ),
-      backgroundColor: Colors.black87,
-      duration: const Duration(seconds: 2),
-      behavior: SnackBarBehavior.floating,
-    ));
+    // FIXED: Use context.mounted, not ScaffoldMessenger.of(context).mounted
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).clearSnackBars();
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(
+          '${_mirrors[_webMirrorIndex]["name"]} unavailable — trying ${_mirrors[next]["name"]}…',
+          style: const TextStyle(color: Colors.white),
+        ),
+        backgroundColor: Colors.black87,
+        duration: const Duration(seconds: 2),
+        behavior: SnackBarBehavior.floating,
+      ));
+    }
     _switchMirror(next);
   }
-
   void _switchEpisode(int ep) {
     setState(() {
       _currentEpisode        = ep;
@@ -603,11 +661,79 @@ class _NativeStreamPlayerScreenState extends State<NativeStreamPlayerScreen>
         : _episodePanelController.reverse();
   }
 
+  // ── FIX: Stop playback and close properly ──────────────────────────────────
+  void _stopPlaybackAndClose() {
+    // Save progress before stopping
+    _saveProgress();
+
+    // Stop the native player if active
+    if (_isNativeMode) {
+      try { _player.stop(); } catch (_) {}
+    }
+
+    // Stop webview video if active
+    if (_webController != null) {
+      try {
+        _webController?.evaluateJavascript(
+            source: 'var v=document.querySelector("video");if(v)v.pause();');
+      } catch (_) {}
+    }
+
+    // Cancel all timers
+    _controlsTimer?.cancel();
+    _loadingTimeout?.cancel();
+    _videoDetectionTimer?.cancel();
+    _progressTimer?.cancel();
+    _resizeDebounce?.cancel();
+
+    // Close mini player if active
+    _miniPlayerService.close();
+
+    // Reset system UI
+    SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
+    SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+
+    // Navigate back
+    if (mounted) Navigator.pop(context);
+  }
+
   // ── Lifecycle ──────────────────────────────────────────────────────────────
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.paused) {
+    if (state == AppLifecycleState.paused || state == AppLifecycleState.inactive) {
+      if (_isNativeMode && _streamUrl != null && !_isResolving) {
+        _miniPlayerService.startMiniPlayer(
+          title: widget.mediaType == 'tv'
+              ? '${widget.title} S${widget.season}E${widget.episode}'
+              : widget.title,
+          streamUrl: _streamUrl!,
+          mediaType: widget.mediaType,
+          season: widget.season,
+          episode: widget.episode,
+          tmdbId: widget.id,
+          position: _player.state.position,
+          duration: _player.state.duration,
+        );
+      } else if (!_isNativeMode && _streamUrl != null && !_isResolving) {
+        _miniPlayerService.startMiniPlayer(
+          title: widget.mediaType == 'tv'
+              ? '${widget.title} S${widget.season}E${widget.episode}'
+              : widget.title,
+          streamUrl: _streamUrl!,
+          mediaType: widget.mediaType,
+          season: widget.season,
+          episode: widget.episode,
+          tmdbId: widget.id,
+          position: Duration.zero,
+          duration: Duration.zero,
+        );
+      }
+
       try { SimplePip().enterPipMode(); } catch (_) {}
+    } else if (state == AppLifecycleState.resumed) {
+      if (_miniPlayerService.isMiniPlayerActive) {
+        _miniPlayerService.stopMiniPlayer();
+      }
     }
   }
 
@@ -633,6 +759,7 @@ class _NativeStreamPlayerScreenState extends State<NativeStreamPlayerScreen>
     _controlsAnimController.dispose();
     _episodePanelController.dispose();
     _player.dispose();
+    _miniPlayerService.close();
     SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
     try { ScreenBrightness().resetScreenBrightness(); } catch (_) {}
@@ -644,7 +771,13 @@ class _NativeStreamPlayerScreenState extends State<NativeStreamPlayerScreen>
     final db  = Provider.of<DatabaseService>(context, listen: false);
     final pos = _player.state.position.inSeconds;
     final dur = _player.state.duration.inSeconds;
-    if (dur > 0) db.updateHistoryProgress(widget.id, pos, dur);
+    if (dur > 0) {
+      db.updateHistoryProgress(widget.id, pos, dur);
+      _miniPlayerService.updatePosition(
+        _player.state.position,
+        _player.state.duration,
+      );
+    }
   }
 
   // ── Build ──────────────────────────────────────────────────────────────────
@@ -652,6 +785,21 @@ class _NativeStreamPlayerScreenState extends State<NativeStreamPlayerScreen>
   Widget build(BuildContext context) {
     return WillPopScope(
       onWillPop: () async {
+        if ((_isNativeMode || !_isNativeMode) && _streamUrl != null && !_isResolving && !_isUnavailable) {
+          _miniPlayerService.startMiniPlayer(
+            title: widget.mediaType == 'tv'
+                ? '${widget.title} S${widget.season}E${widget.episode}'
+                : widget.title,
+            streamUrl: _streamUrl!,
+            mediaType: widget.mediaType,
+            season: widget.season,
+            episode: widget.episode,
+            tmdbId: widget.id,
+            position: _isNativeMode ? _player.state.position : Duration.zero,
+            duration: _isNativeMode ? _player.state.duration : Duration.zero,
+          );
+        }
+
         SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
         SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
         return true;
@@ -761,7 +909,6 @@ class _NativeStreamPlayerScreenState extends State<NativeStreamPlayerScreen>
           onWebViewCreated: (ctrl) {
             _webController = ctrl;
 
-            // ENHANCED: Video playing handler with immediate cancellation
             ctrl.addJavaScriptHandler(
               handlerName: 'onVideoPlaying',
               callback: (_) {
@@ -769,12 +916,10 @@ class _NativeStreamPlayerScreenState extends State<NativeStreamPlayerScreen>
               },
             );
 
-            // NEW: Handle video detection failure
             ctrl.addJavaScriptHandler(
               handlerName: 'onVideoDetectionFailed',
               callback: (_) {
                 if (!mounted || _videoPlayingDetected || _autoSwitchTriggered) return;
-                // If no video detected after 20 seconds, switch to next mirror
                 _switchToNextMirror();
               },
             );
@@ -798,22 +943,14 @@ class _NativeStreamPlayerScreenState extends State<NativeStreamPlayerScreen>
               });
             }
 
-            // Apply layout fixes and ad blocking
             await ctrl.evaluateJavascript(source: _layoutFixScript);
             await ctrl.evaluateJavascript(source: _adKillerScript);
-
-            // Inject the enhanced video playback watcher
             await ctrl.evaluateJavascript(
                 source: _videoPlaybackWatcherScript);
-
-            // Allow a moment for scripts to initialize
             await Future.delayed(const Duration(milliseconds: 800));
 
-            // Apply layout fixes again after delay
             if (mounted) {
               await ctrl.evaluateJavascript(source: _layoutFixScript);
-
-              // Check if video is already playing after page load
               if (!_videoPlayingDetected) {
                 _checkVideoStatusAfterLoad(ctrl);
               }
@@ -878,26 +1015,27 @@ class _NativeStreamPlayerScreenState extends State<NativeStreamPlayerScreen>
     );
   }
 
-  // NEW: Check video status after page load
   void _checkVideoStatusAfterLoad(InAppWebViewController ctrl) {
     ctrl.evaluateJavascript(source: r'''
       (function() {
         var videos = document.querySelectorAll('video');
         for (var i = 0; i < videos.length; i++) {
           var v = videos[i];
-          if (!v.paused && !v.ended && v.readyState > 2 && v.currentTime > 0) {
+          if (!v.paused && !v.ended && v.readyState > 0 && v.currentTime > 0) {
             return 'playing';
           }
           if (v.readyState > 0) {
             return 'loaded';
           }
         }
+        // Check for iframes
+        if (document.querySelectorAll('iframe').length > 0) return 'hasIframe';
         return 'none';
       })();
     ''').then((status) {
       if (!mounted || _videoPlayingDetected) return;
 
-      if (status == 'playing') {
+      if (status == 'playing' || status == 'hasIframe') {
         _onVideoPlayingDetected();
       }
     });
@@ -1030,12 +1168,7 @@ class _NativeStreamPlayerScreenState extends State<NativeStreamPlayerScreen>
             ),
             const SizedBox(height: 12),
             OutlinedButton.icon(
-              onPressed: () {
-                SystemChrome.setPreferredOrientations(
-                    [DeviceOrientation.portraitUp]);
-                SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
-                Navigator.pop(context);
-              },
+              onPressed: _stopPlaybackAndClose, // FIXED: Use stop method
               icon: const Icon(Icons.arrow_back_rounded,
                   color: Colors.white70),
               label: const Text('Go Back',
@@ -1181,11 +1314,7 @@ class _NativeStreamPlayerScreenState extends State<NativeStreamPlayerScreen>
                   IconButton(
                     icon: const Icon(Icons.arrow_back_ios_new_rounded,
                         color: Colors.white, size: 20),
-                    onPressed: () {
-                      SystemChrome.setPreferredOrientations(
-                          [DeviceOrientation.portraitUp]);
-                      Navigator.pop(context);
-                    },
+                    onPressed: _stopPlaybackAndClose, // FIXED: Use stop method
                   ),
                   Expanded(
                     child: Text(title,
@@ -1252,11 +1381,7 @@ class _NativeStreamPlayerScreenState extends State<NativeStreamPlayerScreen>
                   IconButton(
                     icon: const Icon(Icons.arrow_back_ios_new_rounded,
                         color: Colors.white, size: 20),
-                    onPressed: () {
-                      SystemChrome.setPreferredOrientations(
-                          [DeviceOrientation.portraitUp]);
-                      Navigator.pop(context);
-                    },
+                    onPressed: _stopPlaybackAndClose, // FIXED: Use stop method
                   ),
                   const SizedBox(width: 2),
                   Expanded(

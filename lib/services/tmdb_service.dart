@@ -6,7 +6,8 @@ import '../config/config.dart';
 
 class TMDBService extends ChangeNotifier {
   static const String _baseUrl = 'https://api.themoviedb.org/3';
-  static const String imageBaseUrl = 'https://image.tmdb.org/t/p/w500';
+  // FIXED: Increased from w500 to w780 for sharper posters on retina displays
+  static const String imageBaseUrl = 'https://image.tmdb.org/t/p/w780';
   static const String backdropBaseUrl = 'https://image.tmdb.org/t/p/original';
 
   bool _isLoading = false;
@@ -57,9 +58,6 @@ class TMDBService extends ChangeNotifier {
   bool get hasApiKey => AppConfig.tmdbApiKey.isNotEmpty;
 
   // ── Dedicated Upcoming Releases state (paginated, real API only) ─────────
-  // Kept separate from `_upcoming` above (which is just a page-1 snapshot
-  // used for the home feed) so the Upcoming Releases screen can page through
-  // real TMDB results independently without disturbing the home feed cache.
   final List<dynamic> _upcomingMoviesFeed = [];
   List<dynamic> get upcomingMoviesFeed => _upcomingMoviesFeed;
   int _upcomingMoviesPage = 0;
@@ -80,8 +78,6 @@ class TMDBService extends ChangeNotifier {
   bool _upcomingTvErrored = false;
   bool get upcomingTvErrored => _upcomingTvErrored;
 
-  // Human-readable genre names for chips (discover/upcoming endpoints only
-  // return genre_ids, not names) — movie and tv ids diverge for a few genres.
   static const Map<int, String> _movieGenreNames = {
     28: 'Action', 12: 'Adventure', 16: 'Animation', 35: 'Comedy',
     80: 'Crime', 99: 'Documentary', 18: 'Drama', 10751: 'Family',
@@ -350,10 +346,6 @@ class TMDBService extends ChangeNotifier {
     }
   }
 
-  // ── Real, paginated Upcoming Movies ───────────────────────────────────────
-  // Uses TMDB's official /movie/upcoming endpoint, strictly filtered to
-  // future release dates, sorted ascending (soonest first). Supports
-  // infinite scroll via `loadMore`.
   Future<void> fetchUpcomingMovies({bool loadMore = false}) async {
     if (_isLoadingUpcomingMovies) return;
     if (loadMore && !hasMoreUpcomingMovies) return;
@@ -417,10 +409,6 @@ class TMDBService extends ChangeNotifier {
     }
   }
 
-  // ── Real, paginated Upcoming TV ───────────────────────────────────────────
-  // TMDB has no dedicated "upcoming tv" endpoint, so this uses
-  // /discover/tv with first_air_date.gte=today, sorted by soonest first —
-  // the standard, documented way to surface not-yet-aired series.
   Future<void> fetchUpcomingTv({bool loadMore = false}) async {
     if (_isLoadingUpcomingTv) return;
     if (loadMore && !hasMoreUpcomingTv) return;
@@ -536,14 +524,6 @@ class TMDBService extends ChangeNotifier {
     }
   }
 
-  // ── Details fetch ──────────────────────────────────────────────────────
-  // NOTE: the parsing step below is wrapped in its own try/catch, separate
-  // from the network try/catch. Previously, any bad field shape coming back
-  // from TMDB (e.g. a provider with a null logo_path) threw INSIDE the
-  // network try/catch, which quietly logged and returned null — but in
-  // release mode Flutter's default ErrorWidget renders as a blank white box
-  // with no message, which is why this looked like "shimmer then white
-  // screen" with no visible error.
   Future<Map<String, dynamic>?> fetchDetails(int id, String mediaType, String countryCode) async {
     if (!hasApiKey) {
       return _getMockDetails(id, mediaType, countryCode);
@@ -571,11 +551,6 @@ class TMDBService extends ChangeNotifier {
     return null;
   }
 
-  // ── Safe provider mapper ────────────────────────────────────────────────
-  // TMDB frequently returns providers with a null or missing logo_path
-  // (and occasionally a null provider_name). Concatenating a String with
-  // null (`imageBaseUrl + null`) throws a NoSuchMethodError at runtime,
-  // which is what was crashing every single details screen open.
   List<Map<String, String>> _mapProviders(List<dynamic> list) {
     return list.whereType<Map>().map((p) {
       final rawLogo = p['logo_path'];
@@ -618,8 +593,6 @@ class TMDBService extends ChangeNotifier {
     final creditsWrapper = data['credits'];
     final List<dynamic> rawCastList =
     (creditsWrapper is Map<String, dynamic>) ? (creditsWrapper['cast'] ?? []) : [];
-    // Only keep entries that are actually Maps, so downstream `as Map<String,dynamic>`
-    // casts in DetailsScreen can't throw on a stray null/String entry.
     final List<dynamic> castList =
     rawCastList.whereType<Map>().map((c) => Map<String, dynamic>.from(c)).toList();
 
@@ -628,8 +601,6 @@ class TMDBService extends ChangeNotifier {
       voteAverage = (data['vote_average'] as num).toDouble();
     }
 
-    // Genres: guard against genres being missing or malformed, and against
-    // an individual genre entry missing a 'name' key.
     final rawGenres = data['genres'];
     final List<String> genreNames = (rawGenres is List)
         ? rawGenres
@@ -639,7 +610,6 @@ class TMDBService extends ChangeNotifier {
         .toList()
         : <String>[];
 
-    // Seasons: guard against a non-list value.
     final rawSeasons = data['seasons'];
     final List<dynamic> safeSeasons = (rawSeasons is List) ? rawSeasons : <dynamic>[];
 
@@ -664,7 +634,7 @@ class TMDBService extends ChangeNotifier {
     };
   }
 
-  // --- Mock Generators for Demo Mode (used only when no API key is set) ---
+  // --- Mock Generators for Demo Mode ---
   List<dynamic> _getMockTrending() {
     return [
       ..._getMockMovies(),
@@ -678,8 +648,8 @@ class TMDBService extends ChangeNotifier {
         'id': 1,
         'title': 'Gladiator II',
         'media_type': 'movie',
-        'poster_path': 'https://images.unsplash.com/photo-1594909122845-11baa439b7bf?w=500',
-        'backdrop_path': 'https://images.unsplash.com/photo-1594909122845-11baa439b7bf?w=1000',
+        'poster_path': 'https://images.unsplash.com/photo-1594909122845-11baa439b7bf?w=1000',
+        'backdrop_path': 'https://images.unsplash.com/photo-1594909122845-11baa439b7bf?w=1200',
         'vote_average': 7.8,
         'release_date': '2024-11-22',
         'overview': 'Years after witnessing the death of the revered hero Maximus at the hands of his uncle, Lucius is forced to enter the Colosseum.'
@@ -688,8 +658,8 @@ class TMDBService extends ChangeNotifier {
         'id': 2,
         'title': 'Dune: Part Two',
         'media_type': 'movie',
-        'poster_path': 'https://images.unsplash.com/photo-1536440136628-849c177e76a1?w=500',
-        'backdrop_path': 'https://images.unsplash.com/photo-1536440136628-849c177e76a1?w=1000',
+        'poster_path': 'https://images.unsplash.com/photo-1536440136628-849c177e76a1?w=1000',
+        'backdrop_path': 'https://images.unsplash.com/photo-1536440136628-849c177e76a1?w=1200',
         'vote_average': 8.5,
         'release_date': '2024-03-01',
         'overview': 'Paul Atreides unites with Chani and the Fremen while seeking revenge against the conspirators who destroyed his family.'
@@ -698,8 +668,8 @@ class TMDBService extends ChangeNotifier {
         'id': 4,
         'title': 'The Dark Knight',
         'media_type': 'movie',
-        'poster_path': 'https://images.unsplash.com/photo-1478760329108-5c3ed9d495a0?w=500',
-        'backdrop_path': 'https://images.unsplash.com/photo-1478760329108-5c3ed9d495a0?w=1000',
+        'poster_path': 'https://images.unsplash.com/photo-1478760329108-5c3ed9d495a0?w=1000',
+        'backdrop_path': 'https://images.unsplash.com/photo-1478760329108-5c3ed9d495a0?w=1200',
         'vote_average': 9.0,
         'release_date': '2008-07-18',
         'overview': 'Batman raises the stakes in his war on crime. With the help of Lt. Jim Gordon and District Attorney Harvey Dent, Batman sets out to dismantle the remaining criminal organizations.'
@@ -713,8 +683,8 @@ class TMDBService extends ChangeNotifier {
         'id': 3,
         'name': 'Stranger Things',
         'media_type': 'tv',
-        'poster_path': 'https://images.unsplash.com/photo-1618336753974-aae8e04506aa?w=500',
-        'backdrop_path': 'https://images.unsplash.com/photo-1618336753974-aae8e04506aa?w=1000',
+        'poster_path': 'https://images.unsplash.com/photo-1618336753974-aae8e04506aa?w=1000',
+        'backdrop_path': 'https://images.unsplash.com/photo-1618336753974-aae8e04506aa?w=1200',
         'vote_average': 8.6,
         'first_air_date': '2016-07-15',
         'overview': 'When a young boy vanishes, a small town uncovers a mystery involving secret experiments, terrifying supernatural forces and one strange little girl.'
@@ -723,8 +693,8 @@ class TMDBService extends ChangeNotifier {
         'id': 5,
         'name': 'Breaking Bad',
         'media_type': 'tv',
-        'poster_path': 'https://images.unsplash.com/photo-1594909122845-11baa439b7bf?w=500',
-        'backdrop_path': 'https://images.unsplash.com/photo-1594909122845-11baa439b7bf?w=1000',
+        'poster_path': 'https://images.unsplash.com/photo-1594909122845-11baa439b7bf?w=1000',
+        'backdrop_path': 'https://images.unsplash.com/photo-1594909122845-11baa439b7bf?w=1200',
         'vote_average': 9.5,
         'first_air_date': '2008-01-20',
         'overview': 'A high school chemistry teacher diagnosed with inoperable lung cancer turns to manufacturing and selling methamphetamine.'
@@ -745,8 +715,8 @@ class TMDBService extends ChangeNotifier {
         'id': 101,
         'title': 'Avatar 3: Fire and Ash',
         'media_type': 'movie',
-        'poster_path': 'https://images.unsplash.com/photo-1536440136628-849c177e76a1?w=500',
-        'backdrop_path': 'https://images.unsplash.com/photo-1536440136628-849c177e76a1?w=1000',
+        'poster_path': 'https://images.unsplash.com/photo-1536440136628-849c177e76a1?w=1000',
+        'backdrop_path': 'https://images.unsplash.com/photo-1536440136628-849c177e76a1?w=1200',
         'vote_average': 0.0,
         'release_date': '2026-12-18',
         'overview': 'The upcoming epic science fiction film co-produced, co-written, co-edited and directed by James Cameron set on Pandora.'
@@ -755,8 +725,8 @@ class TMDBService extends ChangeNotifier {
         'id': 102,
         'title': 'Avengers: Doomsday',
         'media_type': 'movie',
-        'poster_path': 'https://images.unsplash.com/photo-1478760329108-5c3ed9d495a0?w=500',
-        'backdrop_path': 'https://images.unsplash.com/photo-1478760329108-5c3ed9d495a0?w=1000',
+        'poster_path': 'https://images.unsplash.com/photo-1478760329108-5c3ed9d495a0?w=1000',
+        'backdrop_path': 'https://images.unsplash.com/photo-1478760329108-5c3ed9d495a0?w=1200',
         'vote_average': 0.0,
         'release_date': '2026-05-01',
         'overview': 'An upcoming American superhero film based on the Marvel Comics superhero team the Avengers, featuring Robert Downey Jr. as Doctor Doom.'
@@ -770,8 +740,8 @@ class TMDBService extends ChangeNotifier {
         'id': 201,
         'name': 'Stranger Things: Season 5',
         'media_type': 'tv',
-        'poster_path': 'https://images.unsplash.com/photo-1535016120720-40c646be5580?w=500',
-        'backdrop_path': 'https://images.unsplash.com/photo-1535016120720-40c646be5580?w=1000',
+        'poster_path': 'https://images.unsplash.com/photo-1535016120720-40c646be5580?w=1000',
+        'backdrop_path': 'https://images.unsplash.com/photo-1535016120720-40c646be5580?w=1200',
         'vote_average': 0.0,
         'first_air_date': '2026-11-26',
         'overview': 'The final season of the hit sci-fi horror series, demo mode placeholder — connect a TMDB API key for live data.'

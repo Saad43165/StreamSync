@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 import '../services/tmdb_service.dart';
 import '../theme/app_theme.dart';
 import '../widgets/shimmer_loading.dart';
@@ -14,10 +15,6 @@ class SearchScreen extends StatefulWidget {
   State<SearchScreen> createState() => _SearchScreenState();
 }
 
-// Each category carries its OWN genre id for movies vs tv, since TMDB uses
-// different numeric genre ids per media type (e.g. Action = 28 for movie,
-// 10759 for tv; Comedy = 35 for movie, 35 for tv but Sci-Fi/Drama/Horror all
-// differ). Fixes the old bug where TV items were filtered with movie ids.
 class _CategoryDef {
   final String label;
   final IconData icon;
@@ -29,6 +26,7 @@ class _CategoryDef {
 class _SearchScreenState extends State<SearchScreen> {
   final TextEditingController _searchController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
+  final FocusNode _searchFocusNode = FocusNode();
   Timer? _debounceTimer;
 
   static const List<_CategoryDef> _categories = [
@@ -53,9 +51,28 @@ class _SearchScreenState extends State<SearchScreen> {
     'Stranger Things',
   ];
 
+  // ── Image URL helper ──────────────────────────────────────────────────────
+  static String _posterUrl(String? path) {
+    if (path == null || path.isEmpty) return '';
+    if (path.startsWith('http')) return path;
+    return '${TMDBService.imageBaseUrl}$path';
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    // Dismiss keyboard when scrolling
+    _scrollController.addListener(() {
+      if (_searchFocusNode.hasFocus) {
+        _searchFocusNode.unfocus();
+      }
+    });
+  }
+
   @override
   void dispose() {
     _searchController.dispose();
+    _searchFocusNode.dispose();
     _debounceTimer?.cancel();
     _scrollController.dispose();
     super.dispose();
@@ -89,8 +106,6 @@ class _SearchScreenState extends State<SearchScreen> {
       if (_searchController.text.isNotEmpty) {
         await tmdbService.search(_searchController.text);
       } else {
-        // Re-hit whatever backs the currently selected category so pull-to-
-        // refresh actually refreshes something instead of no-op-ing.
         await tmdbService.search('');
       }
     } catch (_) {
@@ -105,6 +120,7 @@ class _SearchScreenState extends State<SearchScreen> {
     final tmdbService = Provider.of<TMDBService>(context);
     final isLive = tmdbService.hasApiKey;
     final isSearching = _searchController.text.isNotEmpty;
+    final bottomInset = MediaQuery.of(context).viewInsets.bottom;
 
     List<dynamic> baseList;
     if (!isSearching) {
@@ -128,9 +144,6 @@ class _SearchScreenState extends State<SearchScreen> {
           baseList = tmdbService.upcoming;
           break;
         default:
-        // Drama / Anime (and anything else without a dedicated bucket):
-        // fall back to filtering the trending pool by genre id instead of
-        // silently substituting the wrong list.
           baseList = tmdbService.trending.where((item) {
             final isTv = (item['media_type'] == 'tv') ||
                 (item['media_type'] == null && item['name'] != null);
@@ -161,6 +174,8 @@ class _SearchScreenState extends State<SearchScreen> {
 
     return Scaffold(
       backgroundColor: AppTheme.background,
+      // FIX: Use resizeToAvoidBottomInset to handle keyboard properly
+      resizeToAvoidBottomInset: false,
       appBar: AppBar(
         title: const Text('Search & Explore',
             style: TextStyle(
@@ -168,46 +183,68 @@ class _SearchScreenState extends State<SearchScreen> {
         backgroundColor: Colors.transparent,
         elevation: 0,
       ),
-      body: RefreshIndicator(
-        color: AppTheme.accent,
-        backgroundColor: AppTheme.surface,
-        onRefresh: _onRefresh,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16.0),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const SizedBox(height: 8),
-              _buildSearchField(tmdbService),
-              const SizedBox(height: 12),
-              _buildCategoryRow(),
-              const SizedBox(height: 16),
-
-              if (_isOffline) _buildOfflineBanner(),
-
-              if (!isSearching) ...[
-                _buildRecentSearches(tmdbService),
-              ],
-
-              Text(
-                isSearching ? 'SEARCH RESULTS' : 'SUGGESTED FOR YOU',
-                style: const TextStyle(
-                    color: AppTheme.textSecondary,
-                    fontSize: 11,
-                    fontWeight: FontWeight.bold,
-                    letterSpacing: 1.2),
+      body: GestureDetector(
+        // Dismiss keyboard when tapping outside
+        onTap: () => _searchFocusNode.unfocus(),
+        child: RefreshIndicator(
+          color: AppTheme.accent,
+          backgroundColor: AppTheme.surface,
+          onRefresh: _onRefresh,
+          child: SingleChildScrollView(
+            controller: _scrollController,
+            physics: const AlwaysScrollableScrollPhysics(
+                parent: BouncingScrollPhysics()),
+            child: Padding(
+              padding: EdgeInsets.only(
+                left: 16,
+                right: 16,
+                top: 8,
+                // FIX: Add bottom padding when keyboard is open
+                bottom: bottomInset > 0 ? bottomInset + 16 : 16,
               ),
-              const SizedBox(height: 12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  _buildSearchField(tmdbService),
+                  const SizedBox(height: 12),
+                  _buildCategoryRow(),
+                  const SizedBox(height: 16),
 
-              Expanded(
-                child: tmdbService.isLoading
-                    ? ShimmerLoadingPresets.searchGridSkeleton()
-                    : baseList.isEmpty
-                    ? _buildEmptyState(isSearching)
-                    : _buildResultsGrid(baseList, isLive),
+                  if (_isOffline) _buildOfflineBanner(),
+
+                  if (!isSearching) ...[
+                    _buildRecentSearches(tmdbService),
+                  ],
+
+                  Text(
+                    isSearching ? 'SEARCH RESULTS' : 'SUGGESTED FOR YOU',
+                    style: const TextStyle(
+                        color: AppTheme.textSecondary,
+                        fontSize: 11,
+                        fontWeight: FontWeight.bold,
+                        letterSpacing: 1.2),
+                  ),
+                  const SizedBox(height: 12),
+
+                  // FIX: Use flexible height instead of Expanded in scrollable
+                  if (tmdbService.isLoading)
+                    SizedBox(
+                      height: MediaQuery.of(context).size.height * 0.5,
+                      child: ShimmerLoadingPresets.searchGridSkeleton(),
+                    )
+                  else if (baseList.isEmpty)
+                    SizedBox(
+                      height: MediaQuery.of(context).size.height * 0.4,
+                      child: _buildEmptyState(isSearching),
+                    )
+                  else
+                    _buildResultsGrid(baseList, isLive),
+
+                  const SizedBox(height: 100),
+                ],
               ),
-              const SizedBox(height: 100),
-            ],
+            ),
           ),
         ),
       ),
@@ -217,9 +254,11 @@ class _SearchScreenState extends State<SearchScreen> {
   Widget _buildSearchField(TMDBService tmdbService) {
     return TextField(
       controller: _searchController,
+      focusNode: _searchFocusNode,
       onSubmitted: (query) {
         _addSearchQuery(query);
         _runSearch(query);
+        _searchFocusNode.unfocus();
       },
       onChanged: (query) {
         if (_debounceTimer?.isActive ?? false) _debounceTimer!.cancel();
@@ -229,6 +268,7 @@ class _SearchScreenState extends State<SearchScreen> {
         setState(() {});
       },
       style: const TextStyle(color: Colors.white),
+      textInputAction: TextInputAction.search,
       decoration: InputDecoration(
         hintText: 'Search movies, series, dramas...',
         hintStyle: const TextStyle(color: AppTheme.textSecondary, fontSize: 14),
@@ -245,7 +285,7 @@ class _SearchScreenState extends State<SearchScreen> {
             : null,
         filled: true,
         fillColor: AppTheme.surface,
-        contentPadding: const EdgeInsets.symmetric(vertical: 16),
+        contentPadding: const EdgeInsets.symmetric(vertical: 14),
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(16),
           borderSide: const BorderSide(color: Colors.white10, width: 1),
@@ -263,6 +303,7 @@ class _SearchScreenState extends State<SearchScreen> {
       height: 40,
       child: ListView.builder(
         scrollDirection: Axis.horizontal,
+        physics: const BouncingScrollPhysics(),
         itemCount: _categories.length,
         itemBuilder: (context, idx) {
           final cat = _categories[idx];
@@ -417,37 +458,52 @@ class _SearchScreenState extends State<SearchScreen> {
   }
 
   Widget _buildResultsGrid(List<dynamic> items, bool isLive) {
-    return GridView.builder(
-      controller: _scrollController,
-      padding: const EdgeInsets.only(top: 4, bottom: 20),
-      physics: const AlwaysScrollableScrollPhysics(),
-      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-        crossAxisCount: 2,
-        childAspectRatio: 0.62,
-        crossAxisSpacing: 12,
-        mainAxisSpacing: 12,
-      ),
-      itemCount: items.length,
-      itemBuilder: (context, index) {
-        final item = items[index];
-        return _PosterCard(
-          item: item,
-          isLive: isLive,
-          onTap: () {
-            _addSearchQuery(_searchController.text);
-            Navigator.push(
-              context,
-              MaterialPageRoute(
-                builder: (context) => DetailsScreen(
-                  id: item['id'],
-                  mediaType:
-                  item['media_type'] ?? (item['title'] != null ? 'movie' : 'tv'),
+    // FIX: Use a fixed-height container instead of Expanded in scroll view
+    final itemCount = items.length;
+    final crossAxisCount = 2;
+    final aspectRatio = 0.62;
+    final crossAxisSpacing = 12.0;
+    final mainAxisSpacing = 12.0;
+    final screenWidth = MediaQuery.of(context).size.width - 32; // minus padding
+    final itemWidth = (screenWidth - (crossAxisCount - 1) * crossAxisSpacing) / crossAxisCount;
+    final itemHeight = itemWidth / aspectRatio;
+    final rowCount = (itemCount / crossAxisCount).ceil();
+    final gridHeight = rowCount * itemHeight + (rowCount - 1) * mainAxisSpacing;
+
+    return SizedBox(
+      height: gridHeight,
+      child: GridView.builder(
+        physics: const NeverScrollableScrollPhysics(),
+        shrinkWrap: true,
+        padding: const EdgeInsets.only(top: 4, bottom: 20),
+        gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+          crossAxisCount: crossAxisCount,
+          childAspectRatio: aspectRatio,
+          crossAxisSpacing: crossAxisSpacing,
+          mainAxisSpacing: mainAxisSpacing,
+        ),
+        itemCount: items.length,
+        itemBuilder: (context, index) {
+          final item = items[index];
+          return _PosterCard(
+            item: item,
+            isLive: isLive,
+            onTap: () {
+              _addSearchQuery(_searchController.text);
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => DetailsScreen(
+                    id: item['id'],
+                    mediaType:
+                    item['media_type'] ?? (item['title'] != null ? 'movie' : 'tv'),
+                  ),
                 ),
-              ),
-            );
-          },
-        );
-      },
+              );
+            },
+          );
+        },
+      ),
     );
   }
 }
@@ -467,11 +523,11 @@ class _PosterCard extends StatelessWidget {
     final mediaType = item['media_type'] as String?;
 
     final posterPath = item['poster_path'];
-    final imageUrl = isLive && posterPath != null
-        ? '${TMDBService.imageBaseUrl}$posterPath'
-        : (posterPath is String && posterPath.startsWith('http')
-        ? posterPath
-        : null);
+    final imageUrl = posterPath != null
+        ? (posterPath.toString().startsWith('http')
+        ? posterPath.toString()
+        : '${TMDBService.imageBaseUrl}$posterPath')
+        : null;
 
     return GestureDetector(
       onTap: onTap,
@@ -492,61 +548,73 @@ class _PosterCard extends StatelessWidget {
                   child: Stack(
                     fit: StackFit.expand,
                     children: [
-                      imageUrl != null
-                          ? Image.network(
-                        imageUrl,
+                      // FIX: Use CachedNetworkImage for better performance
+                      imageUrl != null && imageUrl.isNotEmpty
+                          ? CachedNetworkImage(
+                        imageUrl: imageUrl,
                         fit: BoxFit.cover,
-                        loadingBuilder: (context, child, loadingProgress) {
-                          if (loadingProgress == null) return child;
-                          return const ImageShimmerPlaceholder(borderRadius: 16);
-                        },
-                        errorBuilder: (context, error, stackTrace) => Container(
+                        placeholder: (_, __) =>
+                        const ImageShimmerPlaceholder(borderRadius: 16),
+                        errorWidget: (_, __, ___) => Container(
                           color: AppTheme.surface,
-                          child: const Icon(Icons.movie, color: Colors.white24, size: 48),
+                          child: const Icon(Icons.movie,
+                              color: Colors.white24, size: 48),
                         ),
+                        memCacheWidth: 200,
                       )
                           : Container(
                         color: AppTheme.surface,
-                        child: const Icon(Icons.movie, color: Colors.white24, size: 48),
+                        child: const Icon(Icons.movie,
+                            color: Colors.white24, size: 48),
                       ),
                       if (mediaType != null)
                         Positioned(
                           top: 8,
                           left: 8,
                           child: Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 7, vertical: 3),
                             decoration: BoxDecoration(
-                              color: (mediaType == 'tv' ? Colors.blueAccent : Colors.purpleAccent)
+                              color: (mediaType == 'tv'
+                                  ? Colors.blueAccent
+                                  : Colors.purpleAccent)
                                   .withOpacity(0.85),
                               borderRadius: BorderRadius.circular(6),
                             ),
                             child: Text(
                               mediaType == 'tv' ? 'SERIES' : 'MOVIE',
                               style: const TextStyle(
-                                  color: Colors.white, fontSize: 9, fontWeight: FontWeight.bold),
+                                  color: Colors.white,
+                                  fontSize: 9,
+                                  fontWeight: FontWeight.bold),
                             ),
                           ),
                         ),
-                      Positioned(
-                        bottom: 8,
-                        right: 8,
-                        child: GlassCard(
-                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                          borderRadius: 6,
-                          child: Row(
-                            children: [
-                              const Icon(Icons.star_rounded,
-                                  color: AppTheme.secondaryAccent, size: 12),
-                              const SizedBox(width: 2),
-                              Text(
-                                rating,
-                                style: const TextStyle(
-                                    color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold),
-                              ),
-                            ],
+                      if (voteAverage > 0)
+                        Positioned(
+                          bottom: 8,
+                          right: 8,
+                          child: GlassCard(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 6, vertical: 2),
+                            borderRadius: 6,
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                const Icon(Icons.star_rounded,
+                                    color: AppTheme.secondaryAccent, size: 12),
+                                const SizedBox(width: 2),
+                                Text(
+                                  rating,
+                                  style: const TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 10,
+                                      fontWeight: FontWeight.bold),
+                                ),
+                              ],
+                            ),
                           ),
                         ),
-                      ),
                     ],
                   ),
                 ),

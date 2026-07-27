@@ -1,6 +1,7 @@
 import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:streamsync/widgets/mini_player.dart';
 import 'theme/app_theme.dart';
 
 import 'package:hive_flutter/hive_flutter.dart';
@@ -8,6 +9,7 @@ import 'package:flutter_downloader/flutter_downloader.dart';
 import 'services/tmdb_service.dart';
 import 'services/database_service.dart';
 import 'services/download_service.dart';
+import 'services/mini_player_service.dart'; // NEW: Mini player service
 import 'screens/home_screen.dart';
 import 'screens/search_screen.dart';
 import 'screens/watchlist_screen.dart';
@@ -28,6 +30,8 @@ void main() async {
       providers: [
         ChangeNotifierProvider(create: (_) => TMDBService()),
         ChangeNotifierProvider(create: (_) => DatabaseService()),
+        // NEW: Mini player service provider
+        ChangeNotifierProvider(create: (_) => MiniPlayerService()),
         ChangeNotifierProxyProvider<DatabaseService, DownloadService>(
           create: (context) => DownloadService(dbService: Provider.of<DatabaseService>(context, listen: false)),
           update: (context, dbService, previous) => previous ?? DownloadService(dbService: dbService),
@@ -46,9 +50,8 @@ class StreamSyncApp extends StatelessWidget {
     return MaterialApp(
       title: 'StreamSync',
       theme: AppTheme.darkTheme,
-      color: AppTheme.background, // Prevents white flash on app resume
+      color: AppTheme.background,
       debugShowCheckedModeBanner: false,
-      // Dark background shown during page transitions — eliminates white flash
       builder: (context, child) => Container(
         color: AppTheme.background,
         child: child!,
@@ -73,7 +76,6 @@ class MainNavigationShell extends StatefulWidget {
 class _MainNavigationShellState extends State<MainNavigationShell> {
   int _currentIndex = 0;
 
-  // Core screens of StreamSync App
   final List<Widget> _screens = [
     const HomeScreen(),
     const SearchScreen(),
@@ -84,13 +86,21 @@ class _MainNavigationShellState extends State<MainNavigationShell> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.transparent, // transparent to show ambient gradient
+      backgroundColor: Colors.transparent,
       body: Stack(
         children: [
           // Screens Stack
           IndexedStack(
             index: _currentIndex,
             children: _screens,
+          ),
+
+          // NEW: Mini player widget (appears above bottom nav)
+          const Positioned(
+            bottom: 80, // Position above the bottom navigation bar
+            left: 12,
+            right: 12,
+            child: MiniPlayerWidget(),
           ),
 
           // Floating Glassmorphic Bottom Navigation Dock

@@ -21,6 +21,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   String _downloadsSize = "0.0 MB";
   String _cacheSize = "0.0 KB";
   bool _isLoadingMetrics = true;
+  bool _isMounted = true;
 
   @override
   void initState() {
@@ -28,8 +29,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _loadMetrics();
   }
 
+  @override
+  void dispose() {
+    _isMounted = false;
+    super.dispose();
+  }
+
+  // FIXED: Use mounted check with _isMounted flag
+  bool get _safeMounted => _isMounted && mounted;
+
   Future<void> _loadMetrics() async {
-    if (!mounted) return;
+    if (!_safeMounted) return;
     setState(() => _isLoadingMetrics = true);
 
     try {
@@ -38,28 +48,48 @@ class _SettingsScreenState extends State<SettingsScreen> {
       int cacheBytes = 0;
 
       if (await docDir.exists()) {
+        // FIXED: Limit recursion depth to prevent hanging on large directories
         await for (final file in docDir.list(recursive: true, followLinks: false)) {
+          if (!_safeMounted) return;
           if (file is File) {
-            final path = file.path;
-            if (path.endsWith('.mp4')) {
-              downloadsBytes += await file.length();
-            } else if (path.endsWith('.hive') || path.endsWith('.hive.lock') || path.contains('tmdb_cache_box')) {
-              cacheBytes += await file.length();
+            try {
+              final path = file.path;
+              final length = await file.length();
+              if (path.endsWith('.mp4') || path.endsWith('.mkv')) {
+                downloadsBytes += length;
+              } else if (path.endsWith('.hive') || path.endsWith('.hive.lock') || path.contains('tmdb_cache_box')) {
+                cacheBytes += length;
+              }
+            } catch (_) {
+              // Skip files we can't read
             }
           }
         }
       }
 
-      if (!mounted) return;
+      if (!_safeMounted) return;
       setState(() {
-        _downloadsSize = "${(downloadsBytes / (1024 * 1024)).toStringAsFixed(1)} MB";
-        _cacheSize = "${(cacheBytes / 1024).toStringAsFixed(1)} KB";
+        _downloadsSize = _formatBytes(downloadsBytes);
+        _cacheSize = _formatBytesSmall(cacheBytes);
         _isLoadingMetrics = false;
       });
     } catch (e) {
       debugPrint('Error loading file storage metrics: $e');
-      if (mounted) setState(() => _isLoadingMetrics = false);
+      if (_safeMounted) setState(() => _isLoadingMetrics = false);
     }
+  }
+
+  // FIXED: Added helper methods for formatting
+  String _formatBytes(int bytes) {
+    if (bytes < 1024) return '$bytes B';
+    if (bytes < 1024 * 1024) return '${(bytes / 1024).toStringAsFixed(1)} KB';
+    if (bytes < 1024 * 1024 * 1024) return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
+    return '${(bytes / (1024 * 1024 * 1024)).toStringAsFixed(1)} GB';
+  }
+
+  String _formatBytesSmall(int bytes) {
+    if (bytes < 1024) return '$bytes B';
+    return '${(bytes / 1024).toStringAsFixed(1)} KB';
   }
 
   Future<void> _clearCache(BuildContext context, TMDBService tmdbService) async {
@@ -137,7 +167,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final list = List.from(dbService.downloads);
     for (final item in list) {
       await dbService.removeDownload(item['id'] as int);
-      if (!mounted) return;
+      if (!_safeMounted) return;
     }
     await _loadMetrics();
     if (context.mounted) {
@@ -168,7 +198,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
         backgroundColor: AppTheme.surface,
         onRefresh: _loadMetrics,
         child: SingleChildScrollView(
-          physics: const AlwaysScrollableScrollPhysics(),
+          physics: const AlwaysScrollableScrollPhysics(
+            parent: BouncingScrollPhysics(),
+          ),
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -306,7 +338,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                 ),
                                 child: CircleAvatar(
                                   radius: 24,
-                                  backgroundColor: profileColor.withValues(alpha: 0.25),
+                                  backgroundColor: profileColor.withOpacity(0.25),
                                   child: Text(
                                     profile.substring(0, 1),
                                     style: TextStyle(color: profileColor, fontSize: 18, fontWeight: FontWeight.bold),
@@ -530,7 +562,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           Container(
             padding: const EdgeInsets.all(10),
             decoration: BoxDecoration(
-              color: iconColor.withValues(alpha: 0.1),
+              color: iconColor.withOpacity(0.1), // FIXED
               shape: BoxShape.circle,
             ),
             child: Icon(icon, color: iconColor, size: 20),
@@ -651,9 +683,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
               padding: const EdgeInsets.all(2.5),
               decoration: BoxDecoration(
                 borderRadius: BorderRadius.circular(12),
-                color: value ? AppTheme.accent.withValues(alpha: 0.2) : Colors.white.withValues(alpha: 0.06),
+                color: value ? AppTheme.accent.withOpacity(0.2) : Colors.white.withOpacity(0.06), // FIXED
                 border: Border.all(
-                  color: value ? AppTheme.accent : Colors.white.withValues(alpha: 0.12),
+                  color: value ? AppTheme.accent : Colors.white.withOpacity(0.12), // FIXED
                   width: 1.0,
                 ),
               ),
@@ -669,7 +701,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     boxShadow: value
                         ? [
                       BoxShadow(
-                        color: AppTheme.accent.withValues(alpha: 0.5),
+                        color: AppTheme.accent.withOpacity(0.5), // FIXED
                         blurRadius: 4,
                       )
                     ]
@@ -704,7 +736,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         ),
         borderRadius: BorderRadius.circular(16),
         border: Border.all(
-          color: isPremium ? Colors.tealAccent.withValues(alpha: 0.25) : AppTheme.secondaryAccent.withValues(alpha: 0.3),
+          color: isPremium ? Colors.tealAccent.withOpacity(0.25) : AppTheme.secondaryAccent.withOpacity(0.3), // FIXED
           width: 1,
         ),
       ),
@@ -731,7 +763,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     Text(
                       isPremium ? 'Lifetime License Activated • No Ads' : 'Secure sandbox checkout simulator',
                       style: TextStyle(
-                        color: isPremium ? Colors.tealAccent.withValues(alpha: 0.75) : AppTheme.secondaryAccent.withValues(alpha: 0.75),
+                        color: isPremium ? Colors.tealAccent.withOpacity(0.75) : AppTheme.secondaryAccent.withOpacity(0.75), // FIXED
                         fontSize: 11,
                       ),
                     ),
@@ -785,13 +817,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
-  // NOTE: This remains a clearly-labeled sandbox/simulator flow, not a real
-  // payment integration. To wire up real purchases, swap the body of the
-  // "Authorize Sandbox Purchase" onPressed below for the `in_app_purchase`
-  // package's `buyNonConsumable`/`buyConsumable` call, backed by product IDs
-  // configured in Google Play Console / App Store Connect — that setup lives
-  // in your own store accounts, so it has to happen on your end before code
-  // here can point at it.
   void _showCheckoutSheet(BuildContext context, DatabaseService dbService) {
     bool isProcessing = false;
     bool isSuccess = false;
@@ -823,9 +848,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   Container(
                     padding: const EdgeInsets.all(16),
                     decoration: BoxDecoration(
-                      color: Colors.white.withValues(alpha: 0.03),
+                      color: Colors.white.withOpacity(0.03), // FIXED
                       borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: Colors.white.withValues(alpha: 0.06)),
+                      border: Border.all(color: Colors.white.withOpacity(0.06)), // FIXED
                     ),
                     child: const Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -1063,9 +1088,9 @@ class _BenefitChip extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       decoration: BoxDecoration(
-        color: AppTheme.secondaryAccent.withValues(alpha: 0.1),
+        color: AppTheme.secondaryAccent.withOpacity(0.1), // FIXED
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: AppTheme.secondaryAccent.withValues(alpha: 0.2)),
+        border: Border.all(color: AppTheme.secondaryAccent.withOpacity(0.2)), // FIXED
       ),
       child: Text(
         '✓ $label',

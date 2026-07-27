@@ -10,23 +10,25 @@ import 'package:permission_handler/permission_handler.dart';
 import 'database_service.dart';
 import 'stream_resolver_service.dart';
 
-/// Matches the port name registered in [FloatingDownloadWidget] / wherever
-/// you listen to progress.
 const _portName = 'downloader_send_port';
 
 class DownloadService extends ChangeNotifier {
   final DatabaseService dbService;
 
-  // keyed by TMDB id (int)
+  // Active downloads: keyed by TMDB id (int)
   final Map<int, double> _activeProgress = {};
   final Map<int, String> _activeStatus = {};
   final Map<int, Map<String, dynamic>> _activeDetails = {};
 
-  // keyed by flutter_downloader taskId (String)
+  // Task mapping
   final Map<String, int> _taskToId = {};          // taskId → TMDB id
   final Map<int, String> _idToTask = {};           // TMDB id → taskId
   final Map<int, String> _idToFilePath = {};       // TMDB id → local file path
   final Map<int, Map<String, dynamic>> _pendingMeta = {}; // saved until task finishes
+
+  // Retry tracking
+  final Map<int, int> _retryCount = {};
+  static const int _maxRetries = 3;
 
   // IsolateNameServer receive port
   final ReceivePort _port = ReceivePort();
@@ -38,9 +40,12 @@ class DownloadService extends ChangeNotifier {
 
   // ── Public getters ───────────────────────────────────────────────────────
 
-  Map<int, double>               get activeProgress => _activeProgress;
-  Map<int, String>               get activeStatus   => _activeStatus;
-  Map<int, Map<String, dynamic>> get activeDetails  => _activeDetails;
+  Map<int, double>               get activeProgress => Map.unmodifiable(_activeProgress);
+  Map<int, String>               get activeStatus   => Map.unmodifiable(_activeStatus);
+  Map<int, Map<String, dynamic>> get activeDetails  => Map.unmodifiable(_activeDetails);
+
+  int get activeCount => _activeProgress.length;
+  bool get canStartNew => activeCount < 3;
 
   bool isDownloading(int id) => _activeProgress.containsKey(id);
 
@@ -56,36 +61,62 @@ class DownloadService extends ChangeNotifier {
   @pragma('vm:entry-point')
   static void _downloadCallback(String id, int status, int progress) {
     final send = IsolateNameServer.lookupPortByName(_portName);
-    send?.send([id, status, progress]);
+    if (send != null) {
+      send.send([id, status, progress]);
+    }
   }
 
   void _onPortMessage(dynamic data) {
     if (data is! List || data.length < 3) return;
-    final taskId   = data[0] as String;
-    final status   = DownloadTaskStatus.fromInt(data[1] as int);
-    final progress = data[2] as int; // 0-100
+    final taskId    = data[0] as String;
+    final statusInt = data[1] as int;
+    final progress  = data[2] as int; // 0-100
 
     final mediaId = _taskToId[taskId];
     if (mediaId == null) return;
 
-    if (status == DownloadTaskStatus.running) {
-      _activeProgress[mediaId] = (progress / 100).clamp(0.0, 1.0);
-      _activeStatus[mediaId]   = 'Downloading... $progress%';
-      notifyListeners();
-    } else if (status == DownloadTaskStatus.complete) {
-      _activeProgress[mediaId] = 1.0;
-      _activeStatus[mediaId]   = '✅ Download complete!';
-      notifyListeners();
-      _finaliseDownload(mediaId, taskId);
-    } else if (status == DownloadTaskStatus.failed) {
-      _activeStatus[mediaId] = '❌ Download failed. Try again.';
-      notifyListeners();
-      _delayedCleanup(mediaId);
-    } else if (status == DownloadTaskStatus.canceled) {
-      _cleanup(mediaId);
-    } else if (status == DownloadTaskStatus.paused) {
-      _activeStatus[mediaId] = '⏸ Paused';
-      notifyListeners();
+    // FIXED: Use DownloadTaskStatus.fromInt() instead of constructor
+    final status = DownloadTaskStatus.fromInt(statusInt);
+
+    switch (status) {
+      case DownloadTaskStatus.running:
+        _activeProgress[mediaId] = (progress / 100).clamp(0.0, 1.0);
+        _activeStatus[mediaId]   = 'Downloading... $progress%';
+        notifyListeners();
+        break;
+
+      case DownloadTaskStatus.complete:
+        _activeProgress[mediaId] = 1.0;
+        _activeStatus[mediaId]   = '✅ Download complete!';
+        notifyListeners();
+        _finaliseDownload(mediaId, taskId);
+        break;
+
+      case DownloadTaskStatus.failed:
+        final retries = _retryCount[mediaId] ?? 0;
+        if (retries < _maxRetries) {
+          _retryCount[mediaId] = retries + 1;
+          _activeStatus[mediaId] = '⚠️ Retrying... (${retries + 1}/$_maxRetries)';
+          notifyListeners();
+          _retryDownload(mediaId, taskId);
+        } else {
+          _activeStatus[mediaId] = '❌ Download failed after $_maxRetries attempts.';
+          notifyListeners();
+          _delayedCleanup(mediaId);
+        }
+        break;
+
+      case DownloadTaskStatus.canceled:
+        _cleanup(mediaId);
+        break;
+
+      case DownloadTaskStatus.paused:
+        _activeStatus[mediaId] = '⏸ Paused';
+        notifyListeners();
+        break;
+
+      default:
+        break;
     }
   }
 
@@ -100,9 +131,17 @@ class DownloadService extends ChangeNotifier {
     final title     = details['title'] ?? details['name'] ?? 'Unknown';
     final mediaType = details['media_type'] as String? ?? 'movie';
 
-    if (isDownloading(id)) return;
+    if (isDownloading(id)) {
+      debugPrint('[DownloadService] Already downloading: $title');
+      return;
+    }
 
-    // ── Request storage permission (Android ≤ 12) ────────────────────────
+    if (!canStartNew) {
+      _showOneShot(id, '⚠️ Maximum concurrent downloads reached (3). Please wait.');
+      return;
+    }
+
+    // ── Request storage permission (Android) ────────────────────────────
     if (Platform.isAndroid) {
       final status = await Permission.storage.request();
       if (!status.isGranted) {
@@ -114,6 +153,7 @@ class DownloadService extends ChangeNotifier {
     _activeProgress[id] = 0.01;
     _activeStatus[id]   = 'Resolving stream…';
     _activeDetails[id]  = Map<String, dynamic>.from(details);
+    _retryCount[id]     = 0;
     notifyListeners();
 
     try {
@@ -140,7 +180,18 @@ class DownloadService extends ChangeNotifier {
       // ── Step 2: Build save directory ──────────────────────────────────
       final saveDir = await _resolveDownloadDir();
 
-      // ── Step 3: Build clean filename ──────────────────────────────────
+      // ── Step 3: Check available storage ───────────────────────────────
+      try {
+        final freeSpace = await _getFreeStorageSpace(saveDir.path);
+        if (freeSpace < 500 * 1024 * 1024) {
+          _showOneShot(id, '❌ Not enough storage space. At least 500MB needed.');
+          return;
+        }
+      } catch (_) {
+        // Continue even if we can't check space
+      }
+
+      // ── Step 4: Build clean filename ──────────────────────────────────
       final cleanTitle = title
           .replaceAll(RegExp(r'[^\w\s\-]'), '')
           .replaceAll(RegExp(r'\s+'), '_')
@@ -152,13 +203,13 @@ class DownloadService extends ChangeNotifier {
       final existing = File(filePath);
       if (await existing.exists()) await existing.delete();
 
-      // ── Step 4: Store metadata for when task finishes ─────────────────
+      // ── Step 5: Store metadata ────────────────────────────────────────
       _pendingMeta[id] = {
         ...details,
         'download_quality':   selectedQuality,
         'download_language':  selectedLanguage,
         'local_file_path':    filePath,
-        'stream_source':      result.source,
+        'stream_source':      result.url,
         'download_date':      DateTime.now().toIso8601String(),
       };
       _idToFilePath[id] = filePath;
@@ -166,12 +217,12 @@ class DownloadService extends ChangeNotifier {
       _activeStatus[id] = 'Starting download…';
       notifyListeners();
 
-      // ── Step 5: Enqueue with flutter_downloader ───────────────────────
+      // ── Step 6: Enqueue with flutter_downloader ───────────────────────
       final taskId = await FlutterDownloader.enqueue(
         url:               sourceUrl,
         savedDir:          saveDir.path,
         fileName:          fileName,
-        showNotification:  true,   // shows in notification tray like YouTube
+        showNotification:  true,
         openFileFromNotification: false,
         headers: {
           'User-Agent': 'Mozilla/5.0 (Linux; Android 12) AppleWebKit/537.36',
@@ -193,7 +244,7 @@ class DownloadService extends ChangeNotifier {
     } catch (e) {
       final msg = _errorMessage(e);
       _showOneShot(id, msg);
-      debugPrint('DownloadService error: $e');
+      debugPrint('[DownloadService] Error: $e');
     }
   }
 
@@ -204,20 +255,67 @@ class DownloadService extends ChangeNotifier {
     final filePath = _idToFilePath[mediaId];
 
     if (meta != null && filePath != null) {
-      final file       = File(filePath);
-      final sizeBytes  = file.existsSync() ? file.lengthSync() : 0;
+      final file      = File(filePath);
+      final sizeBytes = file.existsSync() ? file.lengthSync() : 0;
 
       final record = Map<String, dynamic>.from(meta)
         ..['file_size_bytes'] = sizeBytes;
 
       await dbService.addDownload(record);
+      debugPrint('[DownloadService] ✅ Download saved: ${meta['title']} ($sizeBytes bytes)');
     }
 
     await Future.delayed(const Duration(seconds: 2));
     _cleanup(mediaId);
   }
 
-  // ── Cancel ───────────────────────────────────────────────────────────────
+  // ── Retry download ───────────────────────────────────────────────────────
+
+  Future<void> _retryDownload(int mediaId, String oldTaskId) async {
+    _taskToId.remove(oldTaskId);
+
+    final details  = _activeDetails[mediaId];
+    final filePath = _idToFilePath[mediaId];
+
+    if (details == null || filePath == null) {
+      _cleanup(mediaId);
+      return;
+    }
+
+    try {
+      // Delete partial file
+      final file = File(filePath);
+      if (await file.exists()) await file.delete();
+
+      // Re-enqueue
+      final saveDir  = Directory(filePath).parent;
+      final fileName = filePath.split('/').last;
+
+      final newTaskId = await FlutterDownloader.enqueue(
+        url:               details['stream_source'] as String? ?? '',
+        savedDir:          saveDir.path,
+        fileName:          fileName,
+        showNotification:  true,
+        openFileFromNotification: false,
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Linux; Android 12) AppleWebKit/537.36',
+          'Referer':    'https://vidlink.pro/',
+        },
+      );
+
+      if (newTaskId != null) {
+        _taskToId[newTaskId] = mediaId;
+        _idToTask[mediaId]   = newTaskId;
+      } else {
+        _cleanup(mediaId);
+      }
+    } catch (e) {
+      debugPrint('[DownloadService] Retry error: $e');
+      _cleanup(mediaId);
+    }
+  }
+
+  // ── Cancel / Pause / Resume ─────────────────────────────────────────────
 
   Future<void> cancelDownload(int id) async {
     final taskId = _idToTask[id];
@@ -243,6 +341,13 @@ class DownloadService extends ChangeNotifier {
     }
   }
 
+  Future<void> cancelAllDownloads() async {
+    final ids = _activeProgress.keys.toList();
+    for (final id in ids) {
+      await cancelDownload(id);
+    }
+  }
+
   // ── Helpers ──────────────────────────────────────────────────────────────
 
   Future<Directory> _resolveDownloadDir() async {
@@ -250,7 +355,9 @@ class DownloadService extends ChangeNotifier {
     if (Platform.isAndroid) {
       try {
         final ext = await getExternalStorageDirectory();
-        if (ext != null) dir = Directory('${ext.path}/StreamSync');
+        if (ext != null) {
+          dir = Directory('${ext.path}/StreamSync');
+        }
       } catch (_) {}
     }
     dir ??= Directory('${(await getApplicationDocumentsDirectory()).path}/StreamSync');
@@ -258,14 +365,36 @@ class DownloadService extends ChangeNotifier {
     return dir;
   }
 
+  Future<int> _getFreeStorageSpace(String path) async {
+    try {
+      final result = await Process.run('df', ['-k', path]);
+      if (result.exitCode == 0) {
+        final lines = (result.stdout as String).split('\n');
+        if (lines.length >= 2) {
+          final parts = lines[1].trim().split(RegExp(r'\s+'));
+          if (parts.length >= 4) {
+            return (int.tryParse(parts[3]) ?? 0) * 1024; // KB to bytes
+          }
+        }
+      }
+    } catch (_) {}
+    return 1024 * 1024 * 1024; // Assume 1GB if can't check
+  }
+
   String _errorMessage(Object e) {
     final s = e.toString();
-    if (s.contains('No space') || s.contains('Disk full'))  return '❌ Not enough storage space!';
-    if (s.contains('SocketException') || s.contains('network')) return '❌ Network error. Check your connection.';
+    if (s.contains('No space') || s.contains('Disk full')) {
+      return '❌ Not enough storage space!';
+    }
+    if (s.contains('SocketException') || s.contains('network')) {
+      return '❌ Network error. Check your connection.';
+    }
+    if (s.contains('Permission')) {
+      return '❌ Permission denied. Grant storage access.';
+    }
     return '❌ Download failed. Try again.';
   }
 
-  /// Show error briefly then clean up — no permanent state left behind.
   Future<void> _showOneShot(int id, String message) async {
     _activeStatus[id] = message;
     notifyListeners();
@@ -286,6 +415,7 @@ class DownloadService extends ChangeNotifier {
     _activeDetails.remove(id);
     _idToFilePath.remove(id);
     _pendingMeta.remove(id);
+    _retryCount.remove(id);
     notifyListeners();
   }
 
