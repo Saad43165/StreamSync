@@ -46,7 +46,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       int downloadsBytes = 0;
       int cacheBytes = 0;
 
-      // Scan directories that DownloadService uses: StreamSync/ subfolder
+      // Scan directories that DownloadService uses: StreamVault/ subfolder
       // (also covers Android external storage path)
       final List<Directory> dirsToScan = [docDir];
       if (Platform.isAndroid) {
@@ -486,7 +486,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
               const SizedBox(height: 20),
 
-              _sectionLabel('About StreamSync'),
+              _sectionLabel('About StreamVault'),
               _settingsCard([
                 _infotile(
                   icon: Icons.info_outline_rounded,
@@ -725,7 +725,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 const Text('This is a sandboxed payment verification gate designed for Play Store verification testing.', textAlign: TextAlign.center, style: TextStyle(color: AppTheme.textSecondary, fontSize: 11, height: 1.4)), const SizedBox(height: 20),
                 Container(padding: const EdgeInsets.all(16), decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.03), borderRadius: BorderRadius.circular(12), border: Border.all(color: Colors.white.withValues(alpha: 0.06))),
                     child: const Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-                      Text('StreamSync Pro (Lifetime license)', style: TextStyle(color: Colors.white70, fontSize: 12, fontWeight: FontWeight.bold)),
+                      Text('StreamVault Pro (Lifetime license)', style: TextStyle(color: Colors.white70, fontSize: 12, fontWeight: FontWeight.bold)),
                       Text('\$1.99', style: TextStyle(color: AppTheme.accent, fontWeight: FontWeight.bold, fontSize: 13)),
                     ])),
                 const SizedBox(height: 20),

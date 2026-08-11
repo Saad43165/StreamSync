@@ -370,7 +370,7 @@ class _LoginScreenState extends State<LoginScreen>
                                           context: context,
                                           builder: (_) => AlertDialog(
                                             title: const Text('Terms of Service'),
-                                            content: const Text('Full terms will be available at launch. By using StreamSync you agree to use it for personal, non-commercial viewing only.'),
+                                            content: const Text('Full terms will be available at launch. By using StreamVault you agree to use it for personal, non-commercial viewing only.'),
                                             actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('OK'))],
                                           ),
                                         ),
@@ -388,7 +388,7 @@ class _LoginScreenState extends State<LoginScreen>
                                           context: context,
                                           builder: (_) => AlertDialog(
                                             title: const Text('Privacy Policy'),
-                                            content: const Text('StreamSync stores all data locally on your device. No personal data is transmitted to external servers.'),
+                                            content: const Text('StreamVault stores all data locally on your device. No personal data is transmitted to external servers.'),
                                             actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('OK'))],
                                           ),
                                         ),

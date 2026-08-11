@@ -673,7 +673,7 @@ class _HomeScreenState extends State<HomeScreen>
               Icon(Icons.movie_filter_rounded,
                   color: Color(0x1FFFFFFF), size: 12),
               SizedBox(width: 6),
-              Text('StreamSync  v3.0.0',
+              Text('StreamVault  v3.0.0',
                   style: TextStyle(
                       color: Color(0x1AFFFFFF), fontSize: 11)),
             ]),
@@ -790,7 +790,7 @@ class _CineSyncLogo extends StatelessWidget {
           ),
         ),
         TextSpan(
-          text: 'Sync',
+          text: 'Vault',
           style: TextStyle(
             fontSize: fontSize,
             fontWeight: FontWeight.w800,

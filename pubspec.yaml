@@ -1,5 +1,5 @@
 name: streamsync
-description: "A new Flutter project."
+description: "StreamVault — Your entertainment, secured."
 publish_to: 'none'
 version: 3.0.0+1
 
@@ -39,4 +39,4 @@ dev_dependencies:
 flutter:
   uses-material-design: true
   assets:
-    - assets/app_icon.jpg
+    - assets/

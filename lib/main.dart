@@ -36,18 +36,18 @@ void main() async {
           update: (context, dbService, previous) => previous ?? DownloadService(dbService: dbService),
         ),
       ],
-      child: const StreamSyncApp(),
+      child: const StreamVaultApp(),
     ),
   );
 }
 
-class StreamSyncApp extends StatelessWidget {
-  const StreamSyncApp({super.key});
+class StreamVaultApp extends StatelessWidget {
+  const StreamVaultApp({super.key});
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'StreamSync',
+      title: 'StreamVault',
       theme: AppTheme.darkTheme,
       color: AppTheme.background,
       debugShowCheckedModeBanner: false,

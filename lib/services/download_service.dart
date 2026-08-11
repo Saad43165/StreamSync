@@ -356,11 +356,11 @@ class DownloadService extends ChangeNotifier {
       try {
         final ext = await getExternalStorageDirectory();
         if (ext != null) {
-          dir = Directory('${ext.path}/StreamSync');
+          dir = Directory('${ext.path}/StreamVault');
         }
       } catch (_) {}
     }
-    dir ??= Directory('${(await getApplicationDocumentsDirectory()).path}/StreamSync');
+    dir ??= Directory('${(await getApplicationDocumentsDirectory()).path}/StreamVault');
     if (!await dir.exists()) await dir.create(recursive: true);
     return dir;
   }
