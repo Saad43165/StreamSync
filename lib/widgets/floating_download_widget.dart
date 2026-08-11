@@ -58,7 +58,7 @@ class _FloatingDownloadWidgetState extends State<FloatingDownloadWidget>
         final isDone   = progress >= 1.0;
 
         return Positioned(
-          bottom: 108,
+          bottom: MediaQuery.of(context).padding.bottom + 72,
           right: 16,
           child: GestureDetector(
             onTap: () => setState(() => _isExpanded = !_isExpanded),

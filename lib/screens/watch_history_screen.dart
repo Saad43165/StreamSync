@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 import '../services/database_service.dart';
 import '../theme/app_theme.dart';
 import '../screens/login_screen.dart';
+import '../screens/details_screen.dart';
 
 class WatchHistoryScreen extends StatelessWidget {
   const WatchHistoryScreen({super.key});
@@ -48,7 +50,7 @@ class WatchHistoryScreen extends StatelessWidget {
                   ),
                 );
                 if (confirmed == true && context.mounted) {
-                  dbService.clearDatabase();
+                  dbService.clearHistory();
                   ScaffoldMessenger.of(context).showSnackBar(
                     const SnackBar(content: Text('Watch history cleared.')),
                   );
@@ -142,7 +144,18 @@ class WatchHistoryScreen extends StatelessWidget {
                       final posterPath = item['poster_path'];
                       final rating = ((item['vote_average'] as num?)?.toDouble() ?? 0.0).toStringAsFixed(1);
 
-                      return Container(
+                      return InkWell(
+                        borderRadius: BorderRadius.circular(14),
+                        onTap: () => Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => DetailsScreen(
+                              id: item['id'],
+                              mediaType: mediaType,
+                            ),
+                          ),
+                        ),
+                        child: Container(
                         margin: const EdgeInsets.only(bottom: 12),
                         decoration: BoxDecoration(
                           color: AppTheme.surface,
@@ -155,14 +168,15 @@ class WatchHistoryScreen extends StatelessWidget {
                             ClipRRect(
                               borderRadius: const BorderRadius.horizontal(left: Radius.circular(14)),
                               child: posterPath != null
-                                  ? Image.network(
-                                      posterPath.toString().startsWith('http')
+                                  ? CachedNetworkImage(
+                                      imageUrl: posterPath.toString().startsWith('http')
                                           ? posterPath
                                           : 'https://image.tmdb.org/t/p/w200$posterPath',
                                       width: 70,
                                       height: 95,
                                       fit: BoxFit.cover,
-                                      errorBuilder: (_, __, ___) => _posterPlaceholder(),
+                                      placeholder: (_, __) => _posterPlaceholder(),
+                                      errorWidget: (_, __, ___) => _posterPlaceholder(),
                                     )
                                   : _posterPlaceholder(),
                             ),
@@ -224,6 +238,7 @@ class WatchHistoryScreen extends StatelessWidget {
                             ),
                           ],
                         ),
+                      ),
                       );
                     },
                   ),

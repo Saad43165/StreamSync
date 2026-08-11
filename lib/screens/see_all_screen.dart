@@ -128,7 +128,7 @@ class _SeeAllScreenState extends State<SeeAllScreen> {
                 margin: const EdgeInsets.only(right: 4),
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                 decoration: BoxDecoration(
-                  color: AppTheme.accent.withOpacity(0.15),
+                  color: AppTheme.accent.withValues(alpha: 0.15),
                   borderRadius: BorderRadius.circular(10),
                 ),
                 child: Text(
@@ -169,9 +169,9 @@ class _SeeAllScreenState extends State<SeeAllScreen> {
             padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
             child: Container(
               decoration: BoxDecoration(
-                color: Colors.white.withOpacity(0.05),
+                color: Colors.white.withValues(alpha: 0.05),
                 borderRadius: BorderRadius.circular(14),
-                border: Border.all(color: Colors.white.withOpacity(0.08)),
+                border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
               ),
               child: TextField(
                 controller: _searchController,
@@ -180,11 +180,11 @@ class _SeeAllScreenState extends State<SeeAllScreen> {
                 textInputAction: TextInputAction.search,
                 decoration: InputDecoration(
                   hintText: 'Search within ${widget.categoryTitle.toLowerCase()}...',
-                  hintStyle: TextStyle(color: Colors.white.withOpacity(0.4), fontSize: 14),
-                  prefixIcon: Icon(Icons.search_rounded, color: Colors.white.withOpacity(0.4)),
+                  hintStyle: TextStyle(color: Colors.white.withValues(alpha: 0.4), fontSize: 14),
+                  prefixIcon: Icon(Icons.search_rounded, color: Colors.white.withValues(alpha: 0.4)),
                   suffixIcon: _searchController.text.isNotEmpty
                       ? IconButton(
-                    icon: Icon(Icons.clear_rounded, color: Colors.white.withOpacity(0.4)),
+                    icon: Icon(Icons.clear_rounded, color: Colors.white.withValues(alpha: 0.4)),
                     onPressed: () {
                       _searchController.clear();
                       _searchFocusNode.unfocus();
@@ -277,7 +277,7 @@ class _SeeAllScreenState extends State<SeeAllScreen> {
               width: 64,
               height: 64,
               decoration: BoxDecoration(
-                color: Colors.white.withOpacity(0.04),
+                color: Colors.white.withValues(alpha: 0.04),
                 shape: BoxShape.circle,
               ),
               child: Icon(icon, size: 28, color: Colors.white24),
@@ -287,7 +287,7 @@ class _SeeAllScreenState extends State<SeeAllScreen> {
               text,
               textAlign: TextAlign.center,
               style: TextStyle(
-                color: Colors.white.withOpacity(0.6),
+                color: Colors.white.withValues(alpha: 0.6),
                 fontSize: 13,
                 height: 1.5,
               ),
@@ -329,6 +329,7 @@ class _SeeAllScreenState extends State<SeeAllScreen> {
                       id: item['id'],
                       mediaType: mediaType ?? (item['title'] != null ? 'movie' : 'tv'),
                       posterUrl: imageUrl.isNotEmpty ? imageUrl : null,
+                      heroTag: 'seeall_poster_${item['id']}',
                     ),
                   ),
                 );
@@ -369,7 +370,7 @@ class _SeeAllScreenState extends State<SeeAllScreen> {
                                   padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
                                   decoration: BoxDecoration(
                                     color: (mediaType == 'tv' ? Colors.blueAccent : Colors.purpleAccent)
-                                        .withOpacity(0.85),
+                                        .withValues(alpha: 0.85),
                                     borderRadius: BorderRadius.circular(4),
                                   ),
                                   child: Text(
@@ -450,9 +451,9 @@ class _FilterChip extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
       decoration: BoxDecoration(
-        color: AppTheme.accent.withOpacity(0.1),
+        color: AppTheme.accent.withValues(alpha: 0.1),
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: AppTheme.accent.withOpacity(0.3)),
+        border: Border.all(color: AppTheme.accent.withValues(alpha: 0.3)),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,

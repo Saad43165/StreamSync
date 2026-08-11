@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:provider/provider.dart';
 import '../services/tmdb_service.dart';
 import '../theme/app_theme.dart';
@@ -369,19 +370,16 @@ class _UpcomingReleasesScreenState extends State<UpcomingReleasesScreen>
               child: Stack(
                 children: [
                   imageUrl != null
-                      ? Image.network(
-                    imageUrl,
+                      ? CachedNetworkImage(
+                    imageUrl: imageUrl,
                     width: double.infinity,
                     height: 180,
                     fit: BoxFit.cover,
-                    loadingBuilder: (context, child, progress) {
-                      if (progress == null) return child;
-                      return const SizedBox(
-                        height: 180,
-                        child: ImageShimmerPlaceholder(borderRadius: 0),
-                      );
-                    },
-                    errorBuilder: (_, __, ___) => Container(
+                    placeholder: (_, __) => const SizedBox(
+                      height: 180,
+                      child: ImageShimmerPlaceholder(borderRadius: 0),
+                    ),
+                    errorWidget: (_, __, ___) => Container(
                       height: 180,
                       color: AppTheme.background,
                       child: const Icon(Icons.movie, color: Colors.white24, size: 48),
@@ -411,7 +409,7 @@ class _UpcomingReleasesScreenState extends State<UpcomingReleasesScreen>
                       decoration: BoxDecoration(
                         color: Colors.black87,
                         borderRadius: BorderRadius.circular(20),
-                        border: Border.all(color: countdownColor.withOpacity(0.4)),
+                        border: Border.all(color: countdownColor.withValues(alpha: 0.4)),
                       ),
                       child: Text(
                         countdown,
@@ -426,8 +424,8 @@ class _UpcomingReleasesScreenState extends State<UpcomingReleasesScreen>
                       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                       decoration: BoxDecoration(
                         color: mediaType == 'tv'
-                            ? Colors.blueAccent.withOpacity(0.7)
-                            : Colors.purpleAccent.withOpacity(0.7),
+                            ? Colors.blueAccent.withValues(alpha: 0.7)
+                            : Colors.purpleAccent.withValues(alpha: 0.7),
                         borderRadius: BorderRadius.circular(6),
                       ),
                       child: Text(
@@ -481,7 +479,7 @@ class _UpcomingReleasesScreenState extends State<UpcomingReleasesScreen>
                       children: genres.map((g) => Container(
                         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                         decoration: BoxDecoration(
-                          color: Colors.white.withOpacity(0.05),
+                          color: Colors.white.withValues(alpha: 0.05),
                           borderRadius: BorderRadius.circular(20),
                           border: Border.all(color: Colors.white12),
                         ),

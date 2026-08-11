@@ -546,7 +546,7 @@ class _NativeStreamPlayerScreenState extends State<NativeStreamPlayerScreen>
           '✓ ${_mirrors.isNotEmpty ? _mirrors[_webMirrorIndex]["name"] : "Mirror"} - Playing',
           style: const TextStyle(color: Colors.white),
         ),
-        backgroundColor: Colors.green.withOpacity(0.8),
+        backgroundColor: Colors.green.withValues(alpha: 0.8),
         duration: const Duration(seconds: 2),
         behavior: SnackBarBehavior.floating,
       ));
@@ -709,7 +709,13 @@ class _NativeStreamPlayerScreenState extends State<NativeStreamPlayerScreen>
               title: Text('${speed}x', style: TextStyle(color: _playbackSpeed == speed ? AppTheme.accent : Colors.white70, fontSize: 14)),
               trailing: _playbackSpeed == speed ? Icon(Icons.check, color: AppTheme.accent, size: 20) : null,
               onTap: () {
-                _player.setRate(speed);
+                if (_isNativeMode) {
+                  _player.setRate(speed);
+                } else if (_webController != null) {
+                  // FIX 26: Apply playback rate to embedded WebView video
+                  _webController!.evaluateJavascript(source:
+                    'document.querySelectorAll("video").forEach(function(v){v.playbackRate=$speed;});');
+                }
                 setState(() => _playbackSpeed = speed);
                 Navigator.pop(ctx);
               },
@@ -797,7 +803,9 @@ class _NativeStreamPlayerScreenState extends State<NativeStreamPlayerScreen>
   }
 
   void _saveProgress() {
-    if (!mounted || !_isNativeMode) return;
+    if (!mounted) return;
+    // Only native mode has a media_kit player with real position/duration
+    if (!_isNativeMode) return;
     final db  = Provider.of<DatabaseService>(context, listen: false);
     final pos = _player.state.position.inSeconds;
     final dur = _player.state.duration.inSeconds;
@@ -844,11 +852,13 @@ class _NativeStreamPlayerScreenState extends State<NativeStreamPlayerScreen>
   // ── Build ──────────────────────────────────────────────────────────────────
   @override
   Widget build(BuildContext context) {
-    return WillPopScope(
-      onWillPop: () async {
-        SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
-        SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
-        return true;
+    return PopScope(
+      canPop: true,
+      onPopInvokedWithResult: (didPop, _) {
+        if (didPop) {
+          SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
+          SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+        }
       },
       child: Scaffold(
         backgroundColor: Colors.black,
@@ -892,7 +902,7 @@ class _NativeStreamPlayerScreenState extends State<NativeStreamPlayerScreen>
                 top: 44, left: 16,
                 child: _floatingPill(
                   onTap: _toggleControls,
-                  color: Colors.black.withOpacity(0.72),
+                  color: Colors.black.withValues(alpha: 0.72),
                   borderColor: Colors.white24,
                   child: const Row(mainAxisSize: MainAxisSize.min, children: [
                     Icon(Icons.menu_rounded, color: Colors.white, size: 15),
@@ -1120,7 +1130,7 @@ class _NativeStreamPlayerScreenState extends State<NativeStreamPlayerScreen>
   // ── Unavailable overlay ────────────────────────────────────────────────────
   Widget _buildUnavailableOverlay() {
     return Container(
-      color: Colors.black.withOpacity(0.96),
+      color: Colors.black.withValues(alpha: 0.96),
       child: Center(
         child: Padding(
           padding: const EdgeInsets.all(28),
@@ -1129,9 +1139,9 @@ class _NativeStreamPlayerScreenState extends State<NativeStreamPlayerScreen>
               width: 72, height: 72,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
-                color: Colors.red.withOpacity(0.12),
+                color: Colors.red.withValues(alpha: 0.12),
                 border: Border.all(
-                    color: Colors.redAccent.withOpacity(0.5), width: 2),
+                    color: Colors.redAccent.withValues(alpha: 0.5), width: 2),
               ),
               child: const Icon(Icons.movie_filter_outlined,
                   color: Colors.redAccent, size: 36),
@@ -1221,7 +1231,7 @@ class _NativeStreamPlayerScreenState extends State<NativeStreamPlayerScreen>
   // ── Web loading overlay ────────────────────────────────────────────────────
   Widget _buildWebLoadingOverlay() {
     return Container(
-      color: Colors.black.withOpacity(0.92),
+      color: Colors.black.withValues(alpha: 0.92),
       child: Center(
         child: Column(mainAxisSize: MainAxisSize.min, children: [
           SizedBox(
@@ -1261,7 +1271,7 @@ class _NativeStreamPlayerScreenState extends State<NativeStreamPlayerScreen>
                       decoration: BoxDecoration(
                         color: sel
                             ? AppTheme.accent
-                            : Colors.white.withOpacity(0.08),
+                            : Colors.white.withValues(alpha: 0.08),
                         borderRadius: BorderRadius.circular(16),
                         border: Border.all(
                             color: sel ? AppTheme.accent : Colors.white12),
@@ -1438,9 +1448,9 @@ class _NativeStreamPlayerScreenState extends State<NativeStreamPlayerScreen>
                                 fontWeight: FontWeight.w600),
                             overflow: TextOverflow.ellipsis),
                         if (_streamSource != null)
-                          Text('via $_streamSource',
+                          Text('Native stream',
                               style: TextStyle(
-                                  color: AppTheme.accent.withOpacity(0.8),
+                                  color: AppTheme.accent.withValues(alpha: 0.8),
                                   fontSize: 10)),
                       ],
                     ),
@@ -1449,10 +1459,10 @@ class _NativeStreamPlayerScreenState extends State<NativeStreamPlayerScreen>
                     padding: const EdgeInsets.symmetric(
                         horizontal: 9, vertical: 3),
                     decoration: BoxDecoration(
-                      color: AppTheme.accent.withOpacity(0.18),
+                      color: AppTheme.accent.withValues(alpha: 0.18),
                       borderRadius: BorderRadius.circular(10),
                       border: Border.all(
-                          color: AppTheme.accent.withOpacity(0.55)),
+                          color: AppTheme.accent.withValues(alpha: 0.55)),
                     ),
                     child: Text('🎬 Native',
                         style: TextStyle(
@@ -1530,7 +1540,7 @@ class _NativeStreamPlayerScreenState extends State<NativeStreamPlayerScreen>
                         color: Colors.black54,
                         shape: BoxShape.circle,
                         border: Border.all(
-                            color: AppTheme.accent.withOpacity(0.6),
+                            color: AppTheme.accent.withValues(alpha: 0.6),
                             width: 2),
                       ),
                       child: Icon(
@@ -1642,7 +1652,7 @@ class _NativeStreamPlayerScreenState extends State<NativeStreamPlayerScreen>
         margin: const EdgeInsets.only(right: 8),
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
         decoration: BoxDecoration(
-          color: sel ? AppTheme.accent : Colors.black.withOpacity(0.65),
+          color: sel ? AppTheme.accent : Colors.black.withValues(alpha: 0.65),
           borderRadius: BorderRadius.circular(20),
           border:
           Border.all(color: sel ? AppTheme.accent : Colors.white24),
@@ -1701,7 +1711,7 @@ class _NativeStreamPlayerScreenState extends State<NativeStreamPlayerScreen>
           border: Border.all(color: borderColor),
           boxShadow: [
             BoxShadow(
-                color: Colors.black.withOpacity(0.3),
+                color: Colors.black.withValues(alpha: 0.3),
                 blurRadius: 8,
                 offset: const Offset(0, 2))
           ],
@@ -1717,7 +1727,7 @@ class _NativeStreamPlayerScreenState extends State<NativeStreamPlayerScreen>
       child: Container(
         width: 50, height: 50,
         decoration: BoxDecoration(
-          color: Colors.black.withOpacity(0.5),
+          color: Colors.black.withValues(alpha: 0.5),
           shape: BoxShape.circle,
           border: Border.all(color: Colors.white24),
         ),
@@ -1732,7 +1742,7 @@ class _NativeStreamPlayerScreenState extends State<NativeStreamPlayerScreen>
       width: 52,
       padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 8),
       decoration: BoxDecoration(
-        color: Colors.black.withOpacity(0.72),
+        color: Colors.black.withValues(alpha: 0.72),
         borderRadius: BorderRadius.circular(30),
       ),
       child: Column(mainAxisSize: MainAxisSize.min, children: [
@@ -1764,10 +1774,10 @@ class _NativeStreamPlayerScreenState extends State<NativeStreamPlayerScreen>
           padding: const EdgeInsets.symmetric(
               horizontal: 14, vertical: 9),
           decoration: BoxDecoration(
-            color: Colors.black.withOpacity(0.85),
+            color: Colors.black.withValues(alpha: 0.85),
             borderRadius: BorderRadius.circular(22),
             border: Border.all(
-                color: AppTheme.accent.withOpacity(0.5)),
+                color: AppTheme.accent.withValues(alpha: 0.5)),
           ),
           child: Row(children: [
             Icon(Icons.lock_rounded,
@@ -1790,10 +1800,10 @@ class _NativeStreamPlayerScreenState extends State<NativeStreamPlayerScreen>
       decoration: BoxDecoration(
         color: const Color(0xFF0D0D1A),
         borderRadius: const BorderRadius.vertical(top: Radius.circular(22)),
-        border: Border.all(color: AppTheme.accent.withOpacity(0.3)),
+        border: Border.all(color: AppTheme.accent.withValues(alpha: 0.3)),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.6),
+            color: Colors.black.withValues(alpha: 0.6),
             blurRadius: 20,
             offset: const Offset(0, -4),
           ),
@@ -1829,7 +1839,7 @@ class _NativeStreamPlayerScreenState extends State<NativeStreamPlayerScreen>
               const Spacer(),
               // Close button
               Material(
-                color: Colors.white.withOpacity(0.1),
+                color: Colors.white.withValues(alpha: 0.1),
                 borderRadius: BorderRadius.circular(12),
                 child: InkWell(
                   borderRadius: BorderRadius.circular(12),
@@ -1865,7 +1875,7 @@ class _NativeStreamPlayerScreenState extends State<NativeStreamPlayerScreen>
                 return Padding(
                   padding: const EdgeInsets.only(right: 8),
                   child: Material(
-                    color: sel ? AppTheme.accent : Colors.white.withOpacity(0.08),
+                    color: sel ? AppTheme.accent : Colors.white.withValues(alpha: 0.08),
                     borderRadius: BorderRadius.circular(20),
                     child: InkWell(
                       borderRadius: BorderRadius.circular(20),
@@ -1875,7 +1885,7 @@ class _NativeStreamPlayerScreenState extends State<NativeStreamPlayerScreen>
                         decoration: BoxDecoration(
                           borderRadius: BorderRadius.circular(20),
                           border: Border.all(
-                            color: sel ? AppTheme.accent : Colors.white.withOpacity(0.15),
+                            color: sel ? AppTheme.accent : Colors.white.withValues(alpha: 0.15),
                           ),
                         ),
                         child: Text(
@@ -1912,7 +1922,7 @@ class _NativeStreamPlayerScreenState extends State<NativeStreamPlayerScreen>
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                 decoration: BoxDecoration(
-                  color: AppTheme.accent.withOpacity(0.15),
+                  color: AppTheme.accent.withValues(alpha: 0.15),
                   borderRadius: BorderRadius.circular(8),
                 ),
                 child: Text(
@@ -1951,18 +1961,18 @@ class _NativeStreamPlayerScreenState extends State<NativeStreamPlayerScreen>
                   decoration: BoxDecoration(
                     color: sel
                         ? AppTheme.accent
-                        : Colors.white.withOpacity(0.05),
+                        : Colors.white.withValues(alpha: 0.05),
                     borderRadius: BorderRadius.circular(10),
                     border: Border.all(
                       color: sel
                           ? AppTheme.accent
-                          : Colors.white.withOpacity(0.1),
+                          : Colors.white.withValues(alpha: 0.1),
                       width: sel ? 2 : 1,
                     ),
                     boxShadow: sel
                         ? [
                       BoxShadow(
-                        color: AppTheme.accent.withOpacity(0.3),
+                        color: AppTheme.accent.withValues(alpha: 0.3),
                         blurRadius: 8,
                         offset: const Offset(0, 2),
                       ),

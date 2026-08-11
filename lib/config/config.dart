@@ -5,4 +5,7 @@ class AppConfig {
 
   // Default region for watching providers (US, IN, GB, etc.)
   static const String defaultRegion = 'US';
+
+  // App version
+  static const String appVersion = '3.0.0';
 }

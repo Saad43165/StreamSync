@@ -79,9 +79,11 @@ class StreamResolverService {
     int season = 1,
     int episode = 1,
   }) {
-    final providers = _providers.map((p) {
+    final providers = _providers.asMap().entries.map((entry) {
+      final index = entry.key;
+      final p = entry.value;
       final url = isMovie ? p.movie(tmdbId) : p.tv(tmdbId, season, episode);
-      return {'name': p.name, 'url': url};
+      return {'name': 'Mirror ${index + 1}', 'url': url};
     }).toList();
 
     debugPrint('📋 getAllEmbedProviders: ${providers.length} mirrors generated');

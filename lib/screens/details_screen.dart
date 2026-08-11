@@ -17,12 +17,14 @@ class DetailsScreen extends StatefulWidget {
   final int id;
   final String mediaType;
   final String? posterUrl;
+  final String? heroTag;
 
   const DetailsScreen({
     super.key,
     required this.id,
     required this.mediaType,
     this.posterUrl,
+    this.heroTag,
   });
 
   @override
@@ -219,7 +221,7 @@ class _DetailsScreenState extends State<DetailsScreen> with TickerProviderStateM
                         ),
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(10),
-                          side: BorderSide(color: Colors.white.withOpacity(0.08)),
+                          side: BorderSide(color: Colors.white.withValues(alpha: 0.08)),
                         ),
                       );
                     }).toList(),
@@ -250,7 +252,7 @@ class _DetailsScreenState extends State<DetailsScreen> with TickerProviderStateM
                         ),
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(10),
-                          side: BorderSide(color: Colors.white.withOpacity(0.08)),
+                          side: BorderSide(color: Colors.white.withValues(alpha: 0.08)),
                         ),
                       );
                     }).toList(),
@@ -472,7 +474,7 @@ class _DetailsScreenState extends State<DetailsScreen> with TickerProviderStateM
                       padding: const EdgeInsets.symmetric(horizontal: 20),
                       child: _TitleBlock(
                         posterUrl: widget.posterUrl ?? details['poster_path'],
-                        posterHeroTag: 'poster_${widget.id}',
+                        posterHeroTag: widget.heroTag ?? 'poster_${widget.id}',
                         title: title,
                         rating: rating,
                         releaseYear: releaseYear,
@@ -685,7 +687,7 @@ class _DetailsScreenState extends State<DetailsScreen> with TickerProviderStateM
                   ),
                   boxShadow: [
                     BoxShadow(
-                      color: const Color(0xFF6C63FF).withOpacity(0.35),
+                      color: const Color(0xFF6C63FF).withValues(alpha: 0.35),
                       blurRadius: 18,
                       offset: const Offset(0, 8),
                     ),
@@ -698,7 +700,7 @@ class _DetailsScreenState extends State<DetailsScreen> with TickerProviderStateM
                       width: 34,
                       height: 34,
                       decoration: BoxDecoration(
-                        color: Colors.white.withOpacity(0.18),
+                        color: Colors.white.withValues(alpha: 0.18),
                         shape: BoxShape.circle,
                       ),
                       child: const Icon(Icons.play_arrow_rounded,
@@ -950,8 +952,8 @@ class _ParallaxBackdrop extends StatelessWidget {
           decoration: BoxDecoration(
             gradient: LinearGradient(
               colors: [
-                Colors.black.withOpacity(0.35),
-                AppTheme.background.withOpacity(0.92),
+                Colors.black.withValues(alpha: 0.35),
+                AppTheme.background.withValues(alpha: 0.92),
                 AppTheme.background,
               ],
               begin: Alignment.topCenter,
@@ -1078,8 +1080,8 @@ class _GlassAppBar extends StatelessWidget {
           decoration: BoxDecoration(
             gradient: LinearGradient(
               colors: [
-                Colors.black.withOpacity(0.45),
-                Colors.black.withOpacity(0.0)
+                Colors.black.withValues(alpha: 0.45),
+                Colors.black.withValues(alpha: 0.0)
               ],
               begin: Alignment.topCenter,
               end: Alignment.bottomCenter,
@@ -1169,7 +1171,7 @@ class _GlassIconButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Material(
-      color: Colors.white.withOpacity(0.12),
+      color: Colors.white.withValues(alpha: 0.12),
       shape: const CircleBorder(),
       child: InkWell(
         customBorder: const CircleBorder(),
@@ -1219,13 +1221,13 @@ class _TrailerThumbnail extends StatelessWidget {
               errorWidget: (_, __, ___) => Container(color: AppTheme.surface),
               memCacheWidth: 640,
             ),
-            Container(color: Colors.black.withOpacity(0.15)),
+            Container(color: Colors.black.withValues(alpha: 0.15)),
             Center(
               child: Container(
                 width: 58,
                 height: 58,
                 decoration: BoxDecoration(
-                  color: Colors.black.withOpacity(0.55),
+                  color: Colors.black.withValues(alpha: 0.55),
                   shape: BoxShape.circle,
                   border: Border.all(color: Colors.white24),
                 ),
@@ -1239,7 +1241,7 @@ class _TrailerThumbnail extends StatelessWidget {
               child: Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                 decoration: BoxDecoration(
-                    color: Colors.black.withOpacity(0.6),
+                    color: Colors.black.withValues(alpha: 0.6),
                     borderRadius: BorderRadius.circular(6)),
                 child: const Text('TRAILER',
                     style: TextStyle(
@@ -1374,7 +1376,7 @@ class _TitleBlock extends StatelessWidget {
                         horizontal: 8, vertical: 4),
                     decoration: BoxDecoration(
                       color: AppTheme.secondaryAccent
-                          .withOpacity(0.15),
+                          .withValues(alpha: 0.15),
                       borderRadius: BorderRadius.circular(7),
                     ),
                     child: Row(
@@ -1453,9 +1455,9 @@ class _GenreBadge extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
       decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.06),
+        color: Colors.white.withValues(alpha: 0.06),
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: Colors.white.withOpacity(0.1)),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.1)),
       ),
       child: Text(name,
           style: const TextStyle(
@@ -1484,7 +1486,7 @@ class _FallbackSearchChip extends StatelessWidget {
       child: GlassCard(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
         borderRadius: 10,
-        borderColor: Colors.greenAccent.withOpacity(0.2),
+        borderColor: Colors.greenAccent.withValues(alpha: 0.2),
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -1523,8 +1525,8 @@ class _ProviderCard extends StatelessWidget {
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
         borderRadius: 12,
         borderColor: isFree
-            ? Colors.greenAccent.withOpacity(0.15)
-            : Colors.white.withOpacity(0.08),
+            ? Colors.greenAccent.withValues(alpha: 0.15)
+            : Colors.white.withValues(alpha: 0.08),
         child: Row(
           children: [
             ClipRRect(
@@ -1688,8 +1690,8 @@ class _WatchlistButton extends StatelessWidget {
             padding: const EdgeInsets.symmetric(vertical: 13),
             decoration: BoxDecoration(
               color: inWatchlist
-                  ? const Color(0xFF6C63FF).withOpacity(0.18)
-                  : Colors.white.withOpacity(0.05),
+                  ? const Color(0xFF6C63FF).withValues(alpha: 0.18)
+                  : Colors.white.withValues(alpha: 0.05),
               borderRadius: BorderRadius.circular(14),
               border: Border.all(
                   color: inWatchlist
