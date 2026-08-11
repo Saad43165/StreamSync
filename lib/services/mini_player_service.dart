@@ -233,6 +233,26 @@ class MiniPlayerService extends ChangeNotifier {
     notifyListeners();
   }
 
+  // ── Fullscreen tracking ────────────────────────────────────────────────────
+  bool _wasFullscreen = false;
+  bool get wasFullscreen => _wasFullscreen;
+
+  void markFromFullscreen() { _wasFullscreen = true; }
+  void clearFullscreen()    { _wasFullscreen = false; }
+
+  // ── Seek helpers ───────────────────────────────────────────────────────────
+  void seekForward() {
+    final newPos = _position + const Duration(seconds: 10);
+    _position = newPos > _duration ? _duration : newPos;
+    notifyListeners();
+  }
+
+  void seekBack() {
+    final newPos = _position - const Duration(seconds: 10);
+    _position = newPos < Duration.zero ? Duration.zero : newPos;
+    notifyListeners();
+  }
+
   // ── Intercepted video URL ──────────────────────────────────────────────────
   String? _interceptedVideoUrl;
   String? get interceptedVideoUrl => _interceptedVideoUrl;

@@ -73,6 +73,15 @@ class _NativeStreamPlayerScreenState extends State<NativeStreamPlayerScreen>
   Timer? _progressTimer;
   Timer? _videoDetectionTimer;
 
+  // Swipe-down-to-minimize state
+  double _dragOffset   = 0;
+  bool   _isDraggingDown = false;
+
+  // Seek overlay state
+  bool   _showSeekOverlay    = false;
+  bool   _seekOverlayForward = false;
+  Timer? _seekOverlayTimer;
+
   // Gesture overlays
 
   double _brightness            = 0.5;
@@ -781,6 +790,7 @@ class _NativeStreamPlayerScreenState extends State<NativeStreamPlayerScreen>
     _videoDetectionTimer?.cancel();
     _progressTimer?.cancel();
     _resizeDebounce?.cancel();
+    _seekOverlayTimer?.cancel();
     _controlsAnimController.dispose();
     _episodePanelController.dispose();
     _player.dispose();
@@ -887,15 +897,50 @@ class _NativeStreamPlayerScreenState extends State<NativeStreamPlayerScreen>
   // ── Build ──────────────────────────────────────────────────────────────────
   @override
   Widget build(BuildContext context) {
-    return WillPopScope(
-      onWillPop: () async {
-        SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
-        SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
-        return true;
+    final isPortrait = MediaQuery.of(context).orientation == Orientation.portrait;
+
+    return PopScope(
+      canPop: true,
+      onPopInvokedWithResult: (didPop, _) {
+        if (didPop) {
+          if (_streamUrl != null && !_isResolving && !_isUnavailable) {
+            _startMiniPlayer();
+          }
+          SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
+          SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+        }
       },
       child: Scaffold(
         backgroundColor: Colors.black,
-        body: Stack(
+        body: GestureDetector(
+          onVerticalDragUpdate: isPortrait
+              ? (details) {
+                  if (details.delta.dy > 0) {
+                    setState(() {
+                      _isDraggingDown = true;
+                      _dragOffset =
+                          (_dragOffset + details.delta.dy).clamp(0.0, 300.0);
+                    });
+                  }
+                }
+              : null,
+          onVerticalDragEnd: isPortrait
+              ? (details) {
+                  if (_dragOffset > 120 ||
+                      (details.primaryVelocity ?? 0) > 400) {
+                    if (_streamUrl != null) _startMiniPlayer();
+                    Navigator.of(context).pop();
+                  } else {
+                    setState(() {
+                      _dragOffset    = 0;
+                      _isDraggingDown = false;
+                    });
+                  }
+                }
+              : null,
+          child: Transform.translate(
+            offset: Offset(0, _dragOffset),
+            child: Stack(
           children: [
             SizedBox.expand(child: _buildVideoArea()),
             if (_isNativeMode && !_isResolving && !_isUnavailable) _buildGestureLayer(),
@@ -944,10 +989,42 @@ class _NativeStreamPlayerScreenState extends State<NativeStreamPlayerScreen>
                   ]),
                 ),
               ),
+            // ── Seek overlay ──────────────────────────────────────────────
+            if (_showSeekOverlay)
+              Positioned(
+                right: _seekOverlayForward ? 40 : null,
+                left:  _seekOverlayForward ? null : 40,
+                top: 0, bottom: 0,
+                child: Center(
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 16),
+                    decoration: BoxDecoration(
+                      color: Colors.black54,
+                      borderRadius: BorderRadius.circular(32),
+                    ),
+                    child: Column(mainAxisSize: MainAxisSize.min, children: [
+                      Icon(
+                        _seekOverlayForward
+                            ? Icons.forward_10_rounded
+                            : Icons.replay_10_rounded,
+                        color: Colors.white,
+                        size: 36,
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        _seekOverlayForward ? '+10s' : '-10s',
+                        style: const TextStyle(color: Colors.white, fontSize: 12),
+                      ),
+                    ]),
+                  ),
+                ),
+              ),
           ],
-        ),
-      ),
-    );
+        ),         // closes Stack (Transform.translate child)
+          ),       // closes Transform.translate
+        ),         // closes GestureDetector (Scaffold body)
+      ),           // closes Scaffold (PopScope child)
+    );             // closes PopScope return
   }
 
   // ── Video area ─────────────────────────────────────────────────────────────
@@ -1472,6 +1549,7 @@ class _NativeStreamPlayerScreenState extends State<NativeStreamPlayerScreen>
   // ── Gesture layer (native) ─────────────────────────────────────────────────
   Widget _buildGestureLayer() {
     return Row(children: [
+      // Left third — brightness drag + double-tap seek back
       Expanded(
         child: Listener(
           behavior: HitTestBehavior.translucent,
@@ -1481,12 +1559,25 @@ class _NativeStreamPlayerScreenState extends State<NativeStreamPlayerScreen>
           child: GestureDetector(
             behavior: HitTestBehavior.translucent,
             onTap: _toggleControls,
-            onDoubleTap: () => _seekRelative(-10),
+            onDoubleTap: () {
+              _seekRelative(-10);
+              _showSeekIndicator(false);
+            },
             onVerticalDragUpdate: (d) => _handleVerticalDrag(d, true),
             onVerticalDragEnd: (_) => _handleVerticalDragEnd(true),
+            child: Container(color: Colors.transparent),
           ),
         ),
       ),
+      // Middle third — tap to show/hide controls
+      Expanded(
+        child: GestureDetector(
+          behavior: HitTestBehavior.translucent,
+          onTap: _toggleControls,
+          child: Container(color: Colors.transparent),
+        ),
+      ),
+      // Right third — volume drag + double-tap seek forward
       Expanded(
         child: Listener(
           behavior: HitTestBehavior.translucent,
@@ -1496,9 +1587,13 @@ class _NativeStreamPlayerScreenState extends State<NativeStreamPlayerScreen>
           child: GestureDetector(
             behavior: HitTestBehavior.translucent,
             onTap: _toggleControls,
-            onDoubleTap: () => _seekRelative(10),
+            onDoubleTap: () {
+              _seekRelative(10);
+              _showSeekIndicator(true);
+            },
             onVerticalDragUpdate: (d) => _handleVerticalDrag(d, false),
             onVerticalDragEnd: (_) => _handleVerticalDragEnd(false),
+            child: Container(color: Colors.transparent),
           ),
         ),
       ),
@@ -1788,7 +1883,7 @@ class _NativeStreamPlayerScreenState extends State<NativeStreamPlayerScreen>
                                   style: const TextStyle(
                                       color: Colors.white60,
                                       fontSize: 11)),
-                              Text(_fmt(dur),
+                              Text(_fmtRemaining(pos, dur),
                                   style: const TextStyle(
                                       color: Colors.white60,
                                       fontSize: 11)),
@@ -2183,6 +2278,25 @@ class _NativeStreamPlayerScreenState extends State<NativeStreamPlayerScreen>
   }
 
   // ── Helpers ────────────────────────────────────────────────────────────────
+  void _showSeekIndicator(bool forward) {
+    setState(() {
+      _showSeekOverlay    = true;
+      _seekOverlayForward = forward;
+    });
+    _seekOverlayTimer?.cancel();
+    _seekOverlayTimer = Timer(const Duration(milliseconds: 600), () {
+      if (mounted) setState(() => _showSeekOverlay = false);
+    });
+  }
+
+  String _fmtRemaining(Duration pos, Duration dur) {
+    final remaining = dur > pos ? dur - pos : Duration.zero;
+    final h = remaining.inHours;
+    final m = remaining.inMinutes.remainder(60).toString().padLeft(2, '0');
+    final s = remaining.inSeconds.remainder(60).toString().padLeft(2, '0');
+    return '-${h > 0 ? '$h:$m:$s' : '$m:$s'}';
+  }
+
   void _toggleOrientation() {
     if (MediaQuery.of(context).orientation == Orientation.portrait) {
       SystemChrome.setPreferredOrientations([

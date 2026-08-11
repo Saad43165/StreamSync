@@ -95,19 +95,11 @@ class _MainNavigationShellState extends State<MainNavigationShell> {
           ),
 
           // Mini player - only shows when active
-          Consumer<MiniPlayerService>(
-            builder: (context, miniPlayerService, child) {
-              if (!miniPlayerService.isMiniPlayerActive) {
-                return const SizedBox.shrink();
-              }
-
-              return Positioned(
-                bottom: 80, // Position above the bottom navigation bar
-                left: 12,
-                right: 12,
-                child: const MiniPlayerWidget(),
-              );
-            },
+          Positioned(
+            left: 0,
+            right: 0,
+            bottom: 56, // height of bottom nav bar — mini player sits just above it
+            child: const MiniPlayerWidget(),
           ),
 
           // Floating Glassmorphic Bottom Navigation Dock
