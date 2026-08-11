@@ -214,7 +214,7 @@ class DownloadService extends ChangeNotifier {
         'download_quality':   selectedQuality,
         'download_language':  selectedLanguage,
         'local_file_path':    filePath,
-        'stream_source':      result.url,
+        'stream_source':      sourceUrl,
         'download_date':      DateTime.now().toIso8601String(),
       };
       _idToFilePath[id] = filePath;

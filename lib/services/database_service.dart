@@ -425,6 +425,19 @@ class DatabaseService extends ChangeNotifier {
     }
   }
 
+  Future<void> clearHistory() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      _watchHistory.clear();
+      _totalHoursWatched = 0;
+      await prefs.remove("streamsync_${_activeScope}_history");
+      await prefs.remove("streamsync_${_activeScope}_watch_stats");
+      notifyListeners();
+    } catch (e) {
+      debugPrint('Error clearing history: $e');
+    }
+  }
+
   Future<void> clearDatabase() async {
     try {
       final prefs = await SharedPreferences.getInstance();
