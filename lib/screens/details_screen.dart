@@ -599,16 +599,7 @@ class _DetailsScreenState extends State<DetailsScreen> with TickerProviderStateM
             top: 0,
             left: 0,
             right: 0,
-            child: _GlassAppBar(
-              details: details,
-              onDownloadTap: (dbService) {
-                if (dbService.isDownloaded(details['id'])) {
-                  _deleteDownload(context, dbService, details['id'] as int);
-                } else {
-                  _showDownloadOptionsDialog(details);
-                }
-              },
-            ),
+            child: _GlassAppBar(details: details),
           ),
         ],
       ),
@@ -1110,12 +1101,8 @@ class _ExpandableTextState extends State<_ExpandableText> {
 
 class _GlassAppBar extends StatelessWidget {
   final Map<String, dynamic> details;
-  final void Function(DatabaseService dbService) onDownloadTap;
 
-  const _GlassAppBar({
-    required this.details,
-    required this.onDownloadTap,
-  });
+  const _GlassAppBar({required this.details});
 
   @override
   Widget build(BuildContext context) {
@@ -1145,32 +1132,10 @@ class _GlassAppBar extends StatelessWidget {
                 ),
                 Consumer<DatabaseService>(
                   builder: (context, dbService, _) {
-                    final isDownloaded = dbService.isDownloaded(details['id']);
                     final isSaved = dbService.isInWatchlist(details['id']);
-
-                    final downloadService = Provider.of<DownloadService>(
-                        context, listen: true);
-                    final isActivelyDownloading =
-                    downloadService.isDownloading(details['id'] as int);
 
                     return Row(
                       children: [
-                        _GlassIconButton(
-                          icon: isActivelyDownloading
-                              ? Icons.downloading_rounded
-                              : isDownloaded
-                              ? Icons.download_done_rounded
-                              : Icons.download_rounded,
-                          iconColor: isActivelyDownloading
-                              ? AppTheme.accent
-                              : isDownloaded
-                              ? Colors.greenAccent
-                              : Colors.white,
-                          onTap: isActivelyDownloading
-                              ? () {}
-                              : () => onDownloadTap(dbService),
-                        ),
-                        const SizedBox(width: 8),
                         _GlassIconButton(
                           icon: isSaved
                               ? Icons.bookmark_rounded

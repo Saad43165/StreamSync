@@ -7,7 +7,6 @@ import '../services/database_service.dart';
 import '../theme/app_theme.dart';
 import 'settings_screen.dart';
 import 'details_screen.dart';
-import 'downloads_screen.dart';
 import 'native_stream_player_screen.dart';
 
 class ProfileScreen extends StatefulWidget {
@@ -24,7 +23,7 @@ class _ProfileScreenState extends State<ProfileScreen>
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 3, vsync: this);
+    _tabController = TabController(length: 2, vsync: this);
   }
 
   @override
@@ -47,7 +46,6 @@ class _ProfileScreenState extends State<ProfileScreen>
     final moviesWatched = db.watchHistory.length;
     final hoursWatched = db.totalHoursWatched;
     final watchlistCount = db.watchlist.length;
-    final downloadCount = db.downloads.length;
     final username = db.username.isNotEmpty ? db.username : 'Guest User';
     final initial = username.isNotEmpty ? username[0].toUpperCase() : 'G';
 
@@ -211,7 +209,6 @@ class _ProfileScreenState extends State<ProfileScreen>
                   tabs: [
                     Tab(text: 'Watchlist ($watchlistCount)'),
                     Tab(text: 'History ($moviesWatched)'),
-                    Tab(text: 'Downloads ($downloadCount)'),
                   ],
                 ),
               ),
@@ -223,7 +220,6 @@ class _ProfileScreenState extends State<ProfileScreen>
           children: [
             _buildWatchlistTab(db),
             _buildHistoryTab(db),
-            _buildDownloadsTab(db),
           ],
         ),
       ),
@@ -458,10 +454,14 @@ class _ProfileScreenState extends State<ProfileScreen>
             Navigator.push(
               context,
               MaterialPageRoute(
-                builder: (_) => DetailsScreen(
-                  id: item['id'],
+                builder: (_) => NativeStreamPlayerScreen(
+                  id: item['id'] as int,
+                  title: title,
                   mediaType: mediaType,
-                  posterUrl: _posterUrl(posterPath),
+                  season: (season as int?) ?? 1,
+                  episode: (episode as int?) ?? 1,
+                  posterPath: posterPath,
+                  resumePositionSeconds: progress > 5 ? progress : null,
                 ),
               ),
             );
@@ -518,95 +518,12 @@ class _ProfileScreenState extends State<ProfileScreen>
                     ),
                   ),
                 ),
-                IconButton(
-                  icon: const Icon(Icons.play_circle_outline_rounded, color: Colors.white38, size: 28),
-                  onPressed: () {
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) => DetailsScreen(id: item['id'], mediaType: mediaType, posterUrl: _posterUrl(posterPath)),
-                      ),
-                    );
-                  },
+                const Padding(
+                  padding: EdgeInsets.only(right: 8),
+                  child: Icon(Icons.play_circle_outline_rounded,
+                      color: Colors.white24, size: 24),
                 ),
               ],
-            ),
-          ),
-        );
-      },
-    );
-  }
-
-  Widget _buildDownloadsTab(DatabaseService db) {
-    if (db.downloads.isEmpty) {
-      return _buildEmptyState(
-        icon: Icons.download_done_rounded,
-        title: 'No Downloads',
-        subtitle: 'Download movies & shows to\nwatch offline anytime.',
-      );
-    }
-
-    return ListView.builder(
-      padding: const EdgeInsets.all(16),
-      physics: const BouncingScrollPhysics(),
-      itemCount: db.downloads.length,
-      itemBuilder: (ctx, i) {
-        final item = db.downloads[i];
-        final title = item['title'] ?? item['name'] ?? 'Unknown';
-        final posterPath = item['poster_path'] as String?;
-        final mediaType = item['media_type'] as String? ?? 'movie';
-        final quality = item['download_quality'] as String? ?? '1080p';
-        final size = item['file_size_bytes'] as int?;
-        final sizeStr = size != null ? _formatBytes(size) : 'Unknown size';
-
-        return Container(
-          margin: const EdgeInsets.only(bottom: 10),
-          decoration: BoxDecoration(
-            color: AppTheme.surface,
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: Colors.white.withValues(alpha: 0.06)),
-          ),
-          child: ListTile(
-            contentPadding: const EdgeInsets.all(12),
-            leading: ClipRRect(
-              borderRadius: BorderRadius.circular(8),
-              child: _buildPoster(posterPath: posterPath, title: title, mediaType: mediaType, width: 55, height: 80, memCacheWidth: 110),
-            ),
-            title: Text(title, maxLines: 1, overflow: TextOverflow.ellipsis,
-                style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13)),
-            subtitle: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const SizedBox(height: 4),
-                Row(
-                  children: [
-                    _MiniBadge(text: quality, color: AppTheme.accent),
-                    const SizedBox(width: 6),
-                    Text(sizeStr, style: const TextStyle(color: Colors.white38, fontSize: 10)),
-                  ],
-                ),
-              ],
-            ),
-            trailing: IconButton(
-              icon: const Icon(Icons.play_circle_filled_rounded, color: AppTheme.accent, size: 32),
-              onPressed: () {
-                final localPath = item['local_file_path'] as String?;
-                Navigator.push(
-                  ctx,
-                  MaterialPageRoute(
-                    builder: (_) => NativeStreamPlayerScreen(
-                      id: item['id'] as int,
-                      title: title,
-                      mediaType: mediaType,
-                      season: (item['season'] as int?) ?? 1,
-                      episode: (item['episode'] as int?) ?? 1,
-                      isOffline: localPath != null,
-                      localFilePath: localPath,
-                      posterPath: _posterUrl(posterPath),
-                    ),
-                  ),
-                );
-              },
             ),
           ),
         );
@@ -696,24 +613,6 @@ class _ProfileScreenState extends State<ProfileScreen>
   }
 }
 
-class _MiniBadge extends StatelessWidget {
-  final String text;
-  final Color color;
-  const _MiniBadge({required this.text, required this.color});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.12),
-        borderRadius: BorderRadius.circular(4),
-        border: Border.all(color: color.withValues(alpha: 0.3)),
-      ),
-      child: Text(text, style: TextStyle(fontSize: 9, fontWeight: FontWeight.bold, color: color)),
-    );
-  }
-}
 
 class _StickyTabBarDelegate extends SliverPersistentHeaderDelegate {
   final Widget child;

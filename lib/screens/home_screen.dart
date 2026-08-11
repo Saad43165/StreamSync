@@ -13,6 +13,7 @@ import '../theme/app_theme.dart';
 import '../widgets/glass_card.dart';
 import '../widgets/shimmer_loading.dart';
 import 'details_screen.dart';
+import 'native_stream_player_screen.dart';
 import 'see_all_screen.dart';
 import 'upcoming_releases_screen.dart';
 import 'watch_history_screen.dart';
@@ -318,14 +319,7 @@ class _HomeScreenState extends State<HomeScreen>
 
                 // FIX 6: DatabaseService only used in ContinueWatching;
                 //        isolated so it doesn't cause full-page rebuilds
-                SliverToBoxAdapter(
-                  child: _ContinueWatchingSection(
-                    onItemTap: (id, type) => Navigator.push(context,
-                        MaterialPageRoute(
-                            builder: (_) => DetailsScreen(
-                                id: id, mediaType: type))),
-                  ),
-                ),
+                const SliverToBoxAdapter(child: _ContinueWatchingSection()),
 
                 // FIX 7: Static strips cached as fields — built only once
                 SliverToBoxAdapter(
@@ -1143,8 +1137,7 @@ class _GlassCircleButton extends StatelessWidget {
 // CONTINUE WATCHING — reads DatabaseService itself, isolated
 // ═════════════════════════════════════════════════════════════════════════════
 class _ContinueWatchingSection extends StatelessWidget {
-  const _ContinueWatchingSection({required this.onItemTap});
-  final void Function(int id, String type) onItemTap;
+  const _ContinueWatchingSection();
 
   static String _imgUrl(String? path) {
     if (path == null || path.isEmpty) {
@@ -1154,10 +1147,65 @@ class _ContinueWatchingSection extends StatelessWidget {
     return 'https://image.tmdb.org/t/p/w300$path';
   }
 
+  void _launchPlayer(BuildContext context, Map<String, dynamic> item) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => NativeStreamPlayerScreen(
+          id: item['id'] as int,
+          title: item['title'] ?? 'Unknown',
+          mediaType: item['media_type'] ?? 'movie',
+          season: (item['season'] as int?) ?? 1,
+          episode: (item['episode'] as int?) ?? 1,
+          posterPath: item['poster_path'] as String?,
+          resumePositionSeconds: item['progress_seconds'] as int?,
+        ),
+      ),
+    );
+  }
+
+  void _showRemoveDialog(BuildContext context, DatabaseService db, Map<String, dynamic> item) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: const Color(0xFF1A1A2E),
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (ctx) => SafeArea(
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          Container(
+            width: 36, height: 3.5,
+            margin: const EdgeInsets.only(top: 12, bottom: 16),
+            decoration: BoxDecoration(
+                color: Colors.white24, borderRadius: BorderRadius.circular(2)),
+          ),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 20),
+            child: Text(item['title'] ?? 'Remove',
+                style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 15)),
+          ),
+          const SizedBox(height: 16),
+          ListTile(
+            leading: const Icon(Icons.play_arrow_rounded, color: Colors.white),
+            title: const Text('Resume watching', style: TextStyle(color: Colors.white)),
+            onTap: () { Navigator.pop(ctx); _launchPlayer(context, item); },
+          ),
+          ListTile(
+            leading: const Icon(Icons.remove_circle_outline_rounded, color: Colors.redAccent),
+            title: const Text('Remove from Continue Watching', style: TextStyle(color: Colors.redAccent)),
+            onTap: () {
+              Navigator.pop(ctx);
+              db.removeFromHistory(item['id']);
+            },
+          ),
+          const SizedBox(height: 8),
+        ]),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    final db      = context.watch<DatabaseService>();
-    // Feature 8: Filter out completed (≥95%) and sort by most recently watched
+    final db = context.watch<DatabaseService>();
     final history = db.watchHistory.where((item) {
       final progress = item['progress_seconds'] as int? ?? 0;
       final duration = item['duration_seconds'] as int? ?? 0;
@@ -1181,19 +1229,17 @@ class _ContinueWatchingSection extends StatelessWidget {
             ScaffoldMessenger.of(context).showSnackBar(
                 const SnackBar(content: Text('Watch history cleared.')));
           },
-          child: const Text('Clear all',
-              style: TextStyle(color: _dimText, fontSize: 12)),
+          child: const Text('Clear all', style: TextStyle(color: _dimText, fontSize: 12)),
         ),
       ),
       const SizedBox(height: 14),
       SizedBox(
-        height: 140,
+        height: 182,
         child: ListView.builder(
           scrollDirection: Axis.horizontal,
           physics: const BouncingScrollPhysics(),
           padding: const EdgeInsets.symmetric(horizontal: 16),
           itemCount: history.length,
-          // FIX 12: addRepaintBoundaries=true (default) is good here
           itemBuilder: (ctx, i) {
             final item     = history[i];
             final name     = item['title'] ?? 'Untitled';
@@ -1203,123 +1249,134 @@ class _ContinueWatchingSection extends StatelessWidget {
             final pct      = duration > 0
                 ? (progress / duration).clamp(0.0, 1.0) : 0.0;
             final rem      = duration > progress ? duration - progress : 0;
+            final remMins  = (rem / 60).floor();
+            final isAlmostDone = rem > 0 && remMins < 10;
             final remLabel = rem > 0
-                ? '${(rem / 60).floor()}m left'
-                : (pct > 0 ? 'Watched' : 'Start');
-            final epLabel  = item['media_type'] == 'tv'
-                ? 'S${item['season'] ?? 1} E${item['episode'] ?? 1}'
-                : 'Movie';
-            // Feature 8: Resume timestamp label
+                ? '${remMins}m left'
+                : (pct > 0 ? 'Watched' : 'Start watching');
+            final epLabel = item['media_type'] == 'tv'
+                ? 'S${item['season'] ?? 1}  E${item['episode'] ?? 1}'
+                : null;
             final resumeMins = progress ~/ 60;
             final resumeSecs = progress % 60;
             final resumeLabel = progress > 0
-                ? 'Resume at $resumeMins:${resumeSecs.toString().padLeft(2, '0')}'
+                ? '$resumeMins:${resumeSecs.toString().padLeft(2, '0')}'
                 : null;
 
-            return Dismissible(
-              key: Key('cw_${item['id']}_${item['season']}_${item['episode']}'),
-              direction: DismissDirection.up,
-              onDismissed: (_) => db.removeFromHistory(item['id']),
-              child: GestureDetector(
-                onTap: () => onItemTap(
-                    item['id'], item['media_type'] ?? 'movie'),
-                child: Container(
-                  width: 220,
-                  margin: const EdgeInsets.only(right: 12),
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(14),
-                    color: _card,
+            return GestureDetector(
+              onTap: () => _launchPlayer(context, item),
+              onLongPress: () => _showRemoveDialog(context, db, item),
+              child: Container(
+                width: 260,
+                margin: const EdgeInsets.only(right: 12),
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(12),
+                  color: _card,
+                ),
+                clipBehavior: Clip.antiAlias,
+                child: Stack(fit: StackFit.expand, children: [
+                  CachedNetworkImage(
+                    imageUrl: url,
+                    fit: BoxFit.cover,
+                    placeholder: (_, __) => const ColoredBox(color: _card),
+                    errorWidget: (_, __, ___) => const ColoredBox(color: _card),
+                    memCacheWidth: 520,
                   ),
-                  clipBehavior: Clip.antiAlias,
-                  child: Stack(fit: StackFit.expand, children: [
-                    CachedNetworkImage(
-                      imageUrl: url,
-                      fit: BoxFit.cover,
-                      placeholder: (_, __) => const ColoredBox(color: _card),
-                      errorWidget: (_, __, ___) => const ColoredBox(color: _card),
-                      memCacheWidth: 220,
-                    ),
-                    const DecoratedBox(
-                      decoration: BoxDecoration(
-                        gradient: LinearGradient(
-                          colors: [Colors.transparent, _black87],
-                          begin: Alignment.topCenter,
-                          end: Alignment.bottomCenter,
-                          stops: [0.35, 1.0],
-                        ),
+                  const DecoratedBox(
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        colors: [Colors.transparent, Color(0xCC000000), Color(0xF0000000)],
+                        begin: Alignment.topCenter,
+                        end: Alignment.bottomCenter,
+                        stops: [0.2, 0.65, 1.0],
                       ),
                     ),
-                    Center(
+                  ),
+                  // Play button
+                  Positioned(
+                    top: 0, bottom: 52,
+                    left: 0, right: 0,
+                    child: Center(
                       child: Container(
-                        width: 42, height: 42,
+                        width: 48, height: 48,
                         decoration: BoxDecoration(
-                          color: _black45,
+                          color: Colors.white.withValues(alpha: 0.18),
                           shape: BoxShape.circle,
-                          border: Border.all(color: _white30, width: 1.5),
+                          border: Border.all(color: Colors.white60, width: 1.5),
                         ),
                         child: const Icon(Icons.play_arrow_rounded,
-                            color: Colors.white, size: 24),
+                            color: Colors.white, size: 28),
                       ),
                     ),
-                    Positioned(
-                      bottom: pct > 0 ? 8 : 12,
-                      left: 10, right: 10,
-                      child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Text(name,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
+                  ),
+                  // Bottom info
+                  Positioned(
+                    bottom: pct > 0 ? 8 : 12,
+                    left: 10, right: 10,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(name,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                                color: Colors.white,
+                                fontWeight: FontWeight.w700,
+                                fontSize: 13,
+                                letterSpacing: -0.2)),
+                        const SizedBox(height: 4),
+                        Row(children: [
+                          if (epLabel != null) ...[
+                            Text(epLabel,
+                                style: TextStyle(
+                                    color: AppTheme.accent,
+                                    fontSize: 10.5,
+                                    fontWeight: FontWeight.w600)),
+                            const SizedBox(width: 8),
+                          ],
+                          if (resumeLabel != null) ...[
+                            const Icon(Icons.history_rounded,
+                                size: 10, color: Colors.white38),
+                            const SizedBox(width: 3),
+                            Text(resumeLabel,
                                 style: const TextStyle(
-                                    color: Colors.white,
-                                    fontWeight: FontWeight.bold,
-                                    fontSize: 12)),
-                            if (resumeLabel != null) ...[
-                              const SizedBox(height: 2),
-                              Text(resumeLabel,
-                                  style: const TextStyle(
-                                      color: Color(0xFFAAAAAA),
-                                      fontSize: 9)),
-                            ],
-                            const SizedBox(height: 3),
-                            Row(
-                                mainAxisAlignment:
-                                MainAxisAlignment.spaceBetween,
-                                children: [
-                                  Text(epLabel,
-                                      style: TextStyle(
-                                          color: AppTheme.accent,
-                                          fontSize: 10,
-                                          fontWeight: FontWeight.bold)),
-                                  Container(
-                                    padding: const EdgeInsets.symmetric(
-                                        horizontal: 6, vertical: 2),
-                                    decoration: BoxDecoration(
-                                      color: _black54,
-                                      borderRadius: BorderRadius.circular(6),
-                                    ),
-                                    child: Text(remLabel,
-                                        style: const TextStyle(
-                                            color: Color(0xB3FFFFFF),
-                                            fontSize: 9)),
-                                  ),
-                                ]),
-                          ]),
+                                    color: Colors.white38, fontSize: 10)),
+                          ],
+                          const Spacer(),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 6, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: isAlmostDone
+                                  ? AppTheme.accent.withValues(alpha: 0.25)
+                                  : Colors.white.withValues(alpha: 0.10),
+                              borderRadius: BorderRadius.circular(4),
+                            ),
+                            child: Text(remLabel,
+                                style: TextStyle(
+                                    color: isAlmostDone
+                                        ? AppTheme.accent
+                                        : Colors.white60,
+                                    fontSize: 9.5,
+                                    fontWeight: FontWeight.w600)),
+                          ),
+                        ]),
+                      ],
                     ),
-                    if (pct > 0)
-                      Positioned(
-                        bottom: 0, left: 0, right: 0,
-                        child: LinearProgressIndicator(
-                          value: pct,
-                          backgroundColor: _white12,
-                          valueColor: AlwaysStoppedAnimation<Color>(
-                              AppTheme.accent),
-                          minHeight: 3,
-                        ),
+                  ),
+                  // Progress bar — prominently at bottom
+                  if (pct > 0)
+                    Positioned(
+                      bottom: 0, left: 0, right: 0,
+                      child: LinearProgressIndicator(
+                        value: pct,
+                        backgroundColor: Colors.white.withValues(alpha: 0.15),
+                        valueColor: AlwaysStoppedAnimation<Color>(AppTheme.accent),
+                        minHeight: 4,
                       ),
-                  ]),
-                ),
+                    ),
+                ]),
               ),
             );
           },

@@ -21,9 +21,8 @@ class NativeStreamPlayerScreen extends StatefulWidget {
   final List<dynamic> seasons;
   final bool isOffline;
   final String? localFilePath;
-  final String? posterPath;  // ← ADD THIS
-
-
+  final String? posterPath;
+  final int? resumePositionSeconds;
 
   const NativeStreamPlayerScreen({
     super.key,
@@ -35,9 +34,8 @@ class NativeStreamPlayerScreen extends StatefulWidget {
     this.seasons = const [],
     this.isOffline = false,
     this.localFilePath,
-    this.posterPath,  // ← ADD THIS
-
-
+    this.posterPath,
+    this.resumePositionSeconds,
   });
 
   @override
@@ -92,15 +90,24 @@ class _NativeStreamPlayerScreenState extends State<NativeStreamPlayerScreen>
   bool   _seekOverlayForward = false;
   Timer? _seekOverlayTimer;
 
+  // Skip intro
+  bool   _showSkipIntro      = false;
+  bool   _skipIntroDismissed = false;
+
   // Gesture overlays (brightness / volume sliders)
   double _brightness            = 0.5;
   double _volume                = 1.0;
   bool   _showBrightnessOverlay = false;
   bool   _showVolumeOverlay     = false;
 
+  // Sources panel (mirror selector)
+  bool _showSourcesPanel = false;
+
   // Animations
   late AnimationController _controlsAnimController;
   late Animation<double>   _controlsFade;
+  late Animation<Offset>   _topBarSlide;
+  late Animation<Offset>   _bottomBarSlide;
   late AnimationController _episodePanelController;
   late Animation<Offset>   _episodePanelSlide;
 
@@ -242,10 +249,13 @@ class _NativeStreamPlayerScreenState extends State<NativeStreamPlayerScreen>
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
 
     _controlsAnimController = AnimationController(
-        vsync: this, duration: const Duration(milliseconds: 250));
+        vsync: this, duration: const Duration(milliseconds: 300));
     _controlsFade = Tween<double>(begin: 0.0, end: 1.0).animate(
-        CurvedAnimation(
-            parent: _controlsAnimController, curve: Curves.easeInOut));
+        CurvedAnimation(parent: _controlsAnimController, curve: Curves.easeInOut));
+    _topBarSlide = Tween<Offset>(begin: const Offset(0, -1), end: Offset.zero)
+        .animate(CurvedAnimation(parent: _controlsAnimController, curve: Curves.easeOutCubic));
+    _bottomBarSlide = Tween<Offset>(begin: const Offset(0, 1), end: Offset.zero)
+        .animate(CurvedAnimation(parent: _controlsAnimController, curve: Curves.easeOutCubic));
     _controlsAnimController.forward();
 
     _episodePanelController = AnimationController(
@@ -267,6 +277,15 @@ class _NativeStreamPlayerScreenState extends State<NativeStreamPlayerScreen>
       }
     });
 
+    // Skip intro: show button when position is 30s–4min and not dismissed
+    _player.stream.position.listen((pos) {
+      if (!mounted || !_isNativeMode || _skipIntroDismissed) return;
+      final secs = pos.inSeconds;
+      final show = secs >= 30 && secs <= 240;
+      if (show != _showSkipIntro) {
+        setState(() => _showSkipIntro = show);
+      }
+    });
   }
 
   // ── Resolution ─────────────────────────────────────────────────────────────
@@ -328,6 +347,12 @@ class _NativeStreamPlayerScreenState extends State<NativeStreamPlayerScreen>
         _streamSource = result.source;
       });
       await _player.open(Media(_streamUrl!));
+      // Resume from saved position if this was launched from Continue Watching
+      final resumeSecs = widget.resumePositionSeconds ?? _lastKnownPositionSeconds;
+      if (resumeSecs > 5) {
+        await Future.delayed(const Duration(milliseconds: 800));
+        if (mounted) await _player.seek(Duration(seconds: resumeSecs));
+      }
       _addToHistory();
     } else if (result != null && !result.isNative) {
       final resolvedIndex = _mirrors.indexWhere(
@@ -599,6 +624,8 @@ class _NativeStreamPlayerScreenState extends State<NativeStreamPlayerScreen>
     setState(() {
       _currentEpisode        = ep;
       _isEpisodePanelVisible = false;
+      _skipIntroDismissed    = false;
+      _showSkipIntro         = false;
     });
     _episodePanelController.reverse();
     _resolveAndPlay(overrideSeason: _currentSeason, overrideEpisode: ep);
@@ -644,6 +671,7 @@ class _NativeStreamPlayerScreenState extends State<NativeStreamPlayerScreen>
     } else {
       _controlsAnimController.reverse();
       _controlsTimer?.cancel();
+      if (_showSourcesPanel) setState(() => _showSourcesPanel = false);
     }
   }
 
@@ -768,9 +796,11 @@ class _NativeStreamPlayerScreenState extends State<NativeStreamPlayerScreen>
     setState(() {
       _showAutoplayCountdown = false;
       _currentEpisode++;
-      _isNativeMode = false;
-      _streamUrl = null;
+      _isNativeMode       = false;
+      _streamUrl          = null;
       _interceptedVideoUrl = null;
+      _skipIntroDismissed  = false;
+      _showSkipIntro       = false;
     });
     _resolveAndPlay(overrideSeason: _currentSeason, overrideEpisode: _currentEpisode);
   }
@@ -975,6 +1005,16 @@ class _NativeStreamPlayerScreenState extends State<NativeStreamPlayerScreen>
       // Tell service we're in native mode — mini player will use the global player
       _miniPlayerService.setNativeMode(true);
       _miniPlayerService.updateVideoUrl(url);
+
+      // Resume from saved position (from Continue Watching or DatabaseService)
+      final resumeSecs = widget.resumePositionSeconds ?? _lastKnownPositionSeconds;
+      if (resumeSecs > 5) {
+        // Wait briefly for the player to buffer before seeking
+        await Future.delayed(const Duration(milliseconds: 800));
+        if (mounted) {
+          await _player.seek(Duration(seconds: resumeSecs));
+        }
+      }
     } catch (e) {
       debugPrint('Native switch failed: $e');
       _isSwitchingToNative = false;
@@ -1067,6 +1107,9 @@ class _NativeStreamPlayerScreenState extends State<NativeStreamPlayerScreen>
                     ),
                   ),
                 if (_isLocked) _buildLockIndicator(),
+                // Sources panel — outside FadeTransition so it persists independently
+                if (_showSourcesPanel && !_isResolving && !_isUnavailable)
+                  _buildSourcesPanel(),
                 if (_showBrightnessOverlay)
                   Positioned(left: 40, top: 0, bottom: 0,
                       child: Center(child: _buildSliderIndicator(Icons.brightness_6, _brightness, Colors.yellowAccent))),
@@ -1137,6 +1180,43 @@ class _NativeStreamPlayerScreenState extends State<NativeStreamPlayerScreen>
                           Text(_seekOverlayForward ? '+10s' : '-10s',
                               style: const TextStyle(color: Colors.white, fontSize: 12)),
                         ]),
+                      ),
+                    ),
+                  ),
+                // Skip Intro button
+                if (_showSkipIntro && _isNativeMode)
+                  Positioned(
+                    right: 20, bottom: 100,
+                    child: AnimatedOpacity(
+                      opacity: _showSkipIntro ? 1.0 : 0.0,
+                      duration: const Duration(milliseconds: 300),
+                      child: GestureDetector(
+                        onTap: () {
+                          final pos = _player.state.position;
+                          _player.seek(pos + const Duration(seconds: 90));
+                          setState(() {
+                            _showSkipIntro = false;
+                            _skipIntroDismissed = true;
+                          });
+                        },
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
+                          decoration: BoxDecoration(
+                            color: Colors.black.withValues(alpha: 0.75),
+                            borderRadius: BorderRadius.circular(6),
+                            border: Border.all(color: Colors.white54, width: 1.5),
+                          ),
+                          child: const Row(mainAxisSize: MainAxisSize.min, children: [
+                            Text('Skip Intro',
+                                style: TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w700,
+                                    letterSpacing: 0.5)),
+                            SizedBox(width: 6),
+                            Icon(Icons.fast_forward_rounded, color: Colors.white, size: 16),
+                          ]),
+                        ),
                       ),
                     ),
                   ),
@@ -1666,18 +1746,19 @@ class _NativeStreamPlayerScreenState extends State<NativeStreamPlayerScreen>
     if (!_isNativeMode) {
       return Positioned(
         top: 0, left: 0, right: 0,
-        child: Container(
-          decoration: const BoxDecoration(
-            gradient: LinearGradient(
-              colors: [Color(0xEE000000), Colors.transparent],
-              begin: Alignment.topCenter,
-              end: Alignment.bottomCenter,
+        child: SlideTransition(
+          position: _topBarSlide,
+          child: Container(
+            decoration: const BoxDecoration(
+              gradient: LinearGradient(
+                colors: [Color(0xEE000000), Colors.transparent],
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+              ),
             ),
-          ),
-          child: SafeArea(
-            bottom: false,
-            child: Column(mainAxisSize: MainAxisSize.min, children: [
-              Padding(
+            child: SafeArea(
+              bottom: false,
+              child: Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 4),
                 child: Row(children: [
                   IconButton(
@@ -1693,6 +1774,13 @@ class _NativeStreamPlayerScreenState extends State<NativeStreamPlayerScreen>
                             fontWeight: FontWeight.w600),
                         overflow: TextOverflow.ellipsis),
                   ),
+                  if (_mirrors.isNotEmpty)
+                    IconButton(
+                      icon: const Icon(Icons.tune_rounded,
+                          color: Colors.white70, size: 20),
+                      tooltip: 'Sources',
+                      onPressed: () => setState(() => _showSourcesPanel = !_showSourcesPanel),
+                    ),
                   IconButton(
                     icon: const Icon(Icons.screen_rotation_rounded,
                         color: Colors.white70, size: 20),
@@ -1704,31 +1792,18 @@ class _NativeStreamPlayerScreenState extends State<NativeStreamPlayerScreen>
                           color: Colors.white70, size: 20),
                       onPressed: _toggleEpisodePanel,
                     ),
-                  // Mini Player button for WebView
                   IconButton(
                     icon: const Icon(Icons.picture_in_picture_alt_rounded,
                         color: Colors.white70, size: 20),
                     onPressed: () {
                       _startMiniPlayer();
-                      // Navigate back so user can see the mini player
                       if (mounted) Navigator.pop(context);
                     },
                     tooltip: 'Mini Player',
                   ),
                 ]),
               ),
-              if (_mirrors.isNotEmpty)
-                SizedBox(
-                  height: 40,
-                  child: ListView.builder(
-                    scrollDirection: Axis.horizontal,
-                    padding: const EdgeInsets.only(
-                        left: 14, right: 14, bottom: 8),
-                    itemCount: _mirrors.length,
-                    itemBuilder: (_, i) => _buildMirrorPill(i),
-                  ),
-                ),
-            ]),
+            ),
           ),
         ),
       );
@@ -1755,7 +1830,9 @@ class _NativeStreamPlayerScreenState extends State<NativeStreamPlayerScreen>
 
             Positioned(
               top: 0, left: 0, right: 0,
-              child: Padding(
+              child: SlideTransition(
+                position: _topBarSlide,
+                child: Padding(
                 padding: const EdgeInsets.fromLTRB(4, 4, 4, 0),
                 child: Row(children: [
                   IconButton(
@@ -1833,8 +1910,7 @@ class _NativeStreamPlayerScreenState extends State<NativeStreamPlayerScreen>
                     onPressed: _showSleepTimerDialog,
                     tooltip: 'Sleep Timer',
                   ),
-                  // Mini Player button (like YouTube)
-                  // Mini Player button for WebView
+                  // Mini Player
                   IconButton(
                     icon: const Icon(Icons.picture_in_picture_alt_rounded,
                         color: Colors.white70, size: 20),
@@ -1844,27 +1920,29 @@ class _NativeStreamPlayerScreenState extends State<NativeStreamPlayerScreen>
                     },
                     tooltip: 'Mini Player',
                   ),
+                  // System PiP
                   IconButton(
-                    icon: const Icon(Icons.picture_in_picture_alt,
+                    icon: const Icon(Icons.branding_watermark_outlined,
                         color: Colors.white70, size: 20),
                     onPressed: () async {
                       try {
                         await SimplePip().enterPipMode();
                       } catch (_) {
                         if (mounted) {
-                          ScaffoldMessenger.of(context)
-                              .showSnackBar(const SnackBar(
-                            content: Text(
-                                'PiP not supported on this device'),
-                            duration: Duration(seconds: 2),
-                            behavior: SnackBarBehavior.floating,
-                          ));
+                          ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text('PiP not supported on this device'),
+                                duration: Duration(seconds: 2),
+                                behavior: SnackBarBehavior.floating,
+                              ));
                         }
                       }
                     },
+                    tooltip: 'Picture in Picture',
                   ),
                 ]),
               ),
+              ), // close SlideTransition
             ),
 
             Center(
@@ -1899,7 +1977,9 @@ class _NativeStreamPlayerScreenState extends State<NativeStreamPlayerScreen>
 
             Positioned(
               bottom: 0, left: 0, right: 0,
-              child: Padding(
+              child: SlideTransition(
+                position: _bottomBarSlide,
+                child: Padding(
                 padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
                 child: Column(mainAxisSize: MainAxisSize.min, children: [
                   Row(
@@ -1971,47 +2051,130 @@ class _NativeStreamPlayerScreenState extends State<NativeStreamPlayerScreen>
                   ),
                 ]),
               ),
+              ), // close SlideTransition
             ),
           ]),
         ),
       ]),
     );
   }
-  // ── Mirror pill ────────────────────────────────────────────────────────────
-  Widget _buildMirrorPill(int i) {
-    final sel    = i == _webMirrorIndex;
-    final health = _mirrorHealth[i];
-    final dot = health == null
-        ? Colors.white38
-        : health
-        ? Colors.greenAccent
-        : Colors.redAccent;
 
-    return GestureDetector(
-      onTap: () => _switchMirror(i),
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 180),
-        margin: const EdgeInsets.only(right: 8),
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-        decoration: BoxDecoration(
-          color: sel ? AppTheme.accent : Colors.black.withValues(alpha: 0.65),
-          borderRadius: BorderRadius.circular(20),
-          border:
-          Border.all(color: sel ? AppTheme.accent : Colors.white24),
+  // ── Sources panel (bottom sheet style) ────────────────────────────────────
+  Widget _buildSourcesPanel() {
+    return Positioned(
+      bottom: 0, left: 0, right: 0,
+      child: GestureDetector(
+        onTap: () {}, // absorb taps inside panel
+        child: AnimatedSlide(
+          offset: _showSourcesPanel ? Offset.zero : const Offset(0, 1),
+          duration: const Duration(milliseconds: 320),
+          curve: Curves.easeOutCubic,
+          child: Container(
+            decoration: BoxDecoration(
+              color: const Color(0xF0111114),
+              borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+              border: const Border(top: BorderSide(color: Colors.white12, width: 0.5)),
+              boxShadow: [
+                BoxShadow(color: Colors.black.withValues(alpha: 0.6),
+                    blurRadius: 24, offset: const Offset(0, -4)),
+              ],
+            ),
+            child: SafeArea(
+              top: false,
+              child: Column(mainAxisSize: MainAxisSize.min, children: [
+                // Drag handle
+                Container(
+                  margin: const EdgeInsets.only(top: 10, bottom: 4),
+                  width: 36, height: 3.5,
+                  decoration: BoxDecoration(
+                    color: Colors.white24,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+                // Header
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 8, 12, 12),
+                  child: Row(children: [
+                    const Icon(Icons.tune_rounded, color: Colors.white54, size: 18),
+                    const SizedBox(width: 8),
+                    const Text('Select Source',
+                        style: TextStyle(color: Colors.white,
+                            fontSize: 14, fontWeight: FontWeight.w700)),
+                    const Spacer(),
+                    GestureDetector(
+                      onTap: () => setState(() => _showSourcesPanel = false),
+                      child: Container(
+                        padding: const EdgeInsets.all(6),
+                        child: const Icon(Icons.close_rounded,
+                            color: Colors.white54, size: 20),
+                      ),
+                    ),
+                  ]),
+                ),
+                // Mirror list — full width tappable rows
+                ConstrainedBox(
+                  constraints: const BoxConstraints(maxHeight: 300),
+                  child: ListView.builder(
+                    shrinkWrap: true,
+                    padding: const EdgeInsets.fromLTRB(0, 0, 0, 8),
+                    itemCount: _mirrors.length,
+                    itemBuilder: (_, i) {
+                      final sel    = i == _webMirrorIndex;
+                      final health = _mirrorHealth[i];
+                      final dot = health == null
+                          ? Colors.white38
+                          : health ? Colors.greenAccent : Colors.redAccent;
+                      return GestureDetector(
+                        onTap: () {
+                          _switchMirror(i);
+                          setState(() => _showSourcesPanel = false);
+                        },
+                        child: AnimatedContainer(
+                          duration: const Duration(milliseconds: 180),
+                          margin: const EdgeInsets.symmetric(
+                              horizontal: 16, vertical: 3),
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 14, vertical: 12),
+                          decoration: BoxDecoration(
+                            color: sel
+                                ? AppTheme.accent.withValues(alpha: 0.18)
+                                : Colors.white.withValues(alpha: 0.05),
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(
+                                color: sel
+                                    ? AppTheme.accent.withValues(alpha: 0.5)
+                                    : Colors.white12),
+                          ),
+                          child: Row(children: [
+                            Container(
+                              width: 8, height: 8,
+                              decoration: BoxDecoration(
+                                  color: dot, shape: BoxShape.circle),
+                            ),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: Text(_mirrors[i]['name']!,
+                                  style: TextStyle(
+                                    color: sel ? AppTheme.accent : Colors.white,
+                                    fontSize: 13,
+                                    fontWeight: sel
+                                        ? FontWeight.w700
+                                        : FontWeight.w500,
+                                  )),
+                            ),
+                            if (sel)
+                              Icon(Icons.check_circle_rounded,
+                                  color: AppTheme.accent, size: 18),
+                          ]),
+                        ),
+                      );
+                    },
+                  ),
+                ),
+              ]),
+            ),
+          ),
         ),
-        child: Row(mainAxisSize: MainAxisSize.min, children: [
-          Container(
-              width: 6, height: 6,
-              decoration:
-              BoxDecoration(color: dot, shape: BoxShape.circle)),
-          const SizedBox(width: 5),
-          Text(_mirrors[i]['name']!,
-              style: TextStyle(
-                color: sel ? Colors.black : Colors.white,
-                fontSize: 11,
-                fontWeight: sel ? FontWeight.bold : FontWeight.w500,
-              )),
-        ]),
       ),
     );
   }

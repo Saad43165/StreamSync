@@ -3,19 +3,32 @@ import 'package:flutter/foundation.dart';
 
 class StreamResolverService {
 
-  // ── ALL WORKING Providers (Verified 2025) ──────────────────────────────────
+  // ── Providers ordered by 2025 reliability ─────────────────────────────────
+  // Tier 1 first, Tier 3 last. Names never reach the UI — getAllEmbedProviders()
+  // returns 'Option N' strings only.
 
   static final List<_EmbedProvider> _providers = [
-    // Tier 1 - Most Reliable
+    // ── Tier 1: Highest uptime, fastest CDN ──────────────────────────────────
+    _EmbedProvider(
+      name: 'VidSrc PM',
+      movie: (id) => 'https://vidsrc.pm/embed/movie/$id',
+      tv: (id, s, e) => 'https://vidsrc.pm/embed/tv/$id/$s/$e',
+    ),
+    _EmbedProvider(
+      name: 'VidSrc XYZ',
+      movie: (id) => 'https://vidsrc.xyz/embed/movie?tmdb=$id',
+      tv: (id, s, e) => 'https://vidsrc.xyz/embed/tv?tmdb=$id&season=$s&episode=$e',
+    ),
     _EmbedProvider(
       name: 'VidLink',
       movie: (id) => 'https://vidlink.pro/movie/$id?autoplay=true',
       tv: (id, s, e) => 'https://vidlink.pro/tv/$id/$s/$e?autoplay=true',
     ),
+    // ── Tier 2: Reliable, good catalogue coverage ─────────────────────────────
     _EmbedProvider(
-      name: 'VidSrc PM',
-      movie: (id) => 'https://vidsrc.pm/embed/movie/$id',
-      tv: (id, s, e) => 'https://vidsrc.pm/embed/tv/$id/$s/$e',
+      name: 'AutoEmbed',
+      movie: (id) => 'https://autoembed.co/movie/tmdb/$id',
+      tv: (id, s, e) => 'https://autoembed.co/tv/tmdb/$id-$s-$e',
     ),
     _EmbedProvider(
       name: 'VidFast',
@@ -23,25 +36,20 @@ class StreamResolverService {
       tv: (id, s, e) => 'https://vidfast.vc/tv/$id/$s/$e?autoPlay=true',
     ),
     _EmbedProvider(
-      name: 'AutoEmbed',
-      movie: (id) => 'https://autoembed.co/movie/tmdb/$id',
-      tv: (id, s, e) => 'https://autoembed.co/tv/tmdb/$id-$s-$e',
-    ),
-    _EmbedProvider(
       name: 'MultiEmbed',
       movie: (id) => 'https://multiembed.mov/?video_id=$id&tmdb=1',
       tv: (id, s, e) => 'https://multiembed.mov/?video_id=$id&tmdb=1&s=$s&e=$e',
     ),
-    // Tier 2 - Good Coverage
+    _EmbedProvider(
+      name: 'SmashyStream',
+      movie: (id) => 'https://embed.smashystream.com/playere.php?tmdb=$id&type=movie',
+      tv: (id, s, e) => 'https://embed.smashystream.com/playere.php?tmdb=$id&type=tv&season=$s&episode=$e',
+    ),
+    // ── Tier 3: Decent backup mirrors ────────────────────────────────────────
     _EmbedProvider(
       name: '2Embed',
       movie: (id) => 'https://www.2embed.cc/embed/$id',
       tv: (id, s, e) => 'https://www.2embed.cc/embedtv/$id&s=$s&e=$e',
-    ),
-    _EmbedProvider(
-      name: '2Embed Skin',
-      movie: (id) => 'https://www.2embed.skin/embed/$id',
-      tv: (id, s, e) => 'https://www.2embed.skin/embedtv/$id&s=$s&e=$e',
     ),
     _EmbedProvider(
       name: 'NontonGo',
@@ -58,11 +66,16 @@ class StreamResolverService {
       movie: (id) => 'https://vidphantom.com/movie/$id',
       tv: (id, s, e) => 'https://vidphantom.com/tv/$id/$s/$e',
     ),
-    // Tier 3 - Backup Mirrors
+    // ── Tier 4: Last-resort fallbacks ────────────────────────────────────────
+    _EmbedProvider(
+      name: '2Embed Skin',
+      movie: (id) => 'https://www.2embed.skin/embed/$id',
+      tv: (id, s, e) => 'https://www.2embed.skin/embedtv/$id&s=$s&e=$e',
+    ),
     _EmbedProvider(
       name: 'Filmu',
-      movie: (id) => 'https://embed.filmu.in/movie/$id',
-      tv: (id, s, e) => 'https://embed.filmu.in/tv/$id/$s/$e',
+      movie: (id) => 'https://embed.filme.in/movie/$id',
+      tv: (id, s, e) => 'https://embed.filme.in/tv/$id/$s/$e',
     ),
     _EmbedProvider(
       name: 'VidSrc Top',
