@@ -73,18 +73,26 @@ class _NativeStreamPlayerScreenState extends State<NativeStreamPlayerScreen>
   Timer? _progressTimer;
   Timer? _videoDetectionTimer;
 
-  // Feature 4: Autoplay countdown
+  // Autoplay countdown
   bool _showAutoplayCountdown = false;
   int _autoplayCountdown = 10;
   Timer? _autoplayTimer;
 
-  // Feature 5: Sleep timer
+  // Sleep timer
   Timer? _sleepTimer;
   Timer? _sleepCountdownTimer;
   int? _sleepMinutesRemaining;
 
-  // Gesture overlays
+  // Swipe-down-to-minimize
+  double _dragOffset    = 0;
+  bool   _isDraggingDown = false;
 
+  // Seek overlay (double-tap zones)
+  bool   _showSeekOverlay    = false;
+  bool   _seekOverlayForward = false;
+  Timer? _seekOverlayTimer;
+
+  // Gesture overlays (brightness / volume sliders)
   double _brightness            = 0.5;
   double _volume                = 1.0;
   bool   _showBrightnessOverlay = false;
@@ -96,9 +104,9 @@ class _NativeStreamPlayerScreenState extends State<NativeStreamPlayerScreen>
   late AnimationController _episodePanelController;
   late Animation<Offset>   _episodePanelSlide;
 
-  // Native player
-  late final Player          _player          = Player();
-  late final VideoController _videoController = VideoController(_player);
+  // Native player — global instances from MiniPlayerService so audio continues in mini player
+  Player get _player => _miniPlayerService.player;
+  VideoController get _videoController => _miniPlayerService.videoController;
 
   // WebView
   InAppWebViewController? _webController;
@@ -830,14 +838,13 @@ class _NativeStreamPlayerScreenState extends State<NativeStreamPlayerScreen>
     setState(() => _sleepMinutesRemaining = null);
   }
 
-  // ── FIX: Stop playback and close properly ──────────────────────────────────
+  // ── Stop playback and close (user explicitly closes, not minimizes) ──────────
   void _stopPlaybackAndClose() {
     _saveProgress();
+    _miniPlayerService.setNativeMode(false);
 
-    // Stop the native player if active
-    if (_isNativeMode) {
-      try { _player.stop(); } catch (_) {}
-    }
+    // Stop the native player (explicit close — not minimizing)
+    try { _player.stop(); } catch (_) {}
 
     // Stop webview video if active
     if (_webController != null) {
@@ -902,10 +909,10 @@ class _NativeStreamPlayerScreenState extends State<NativeStreamPlayerScreen>
     _autoplayTimer?.cancel();
     _sleepTimer?.cancel();
     _sleepCountdownTimer?.cancel();
+    _seekOverlayTimer?.cancel();
     _controlsAnimController.dispose();
     _episodePanelController.dispose();
-    _player.dispose();
-    // DO NOT close mini player service - managed by Provider
+    // Player is owned by MiniPlayerService — do NOT dispose it here
     SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
     try { ScreenBrightness().resetScreenBrightness(); } catch (_) {}
@@ -962,10 +969,11 @@ class _NativeStreamPlayerScreenState extends State<NativeStreamPlayerScreen>
       setState(() {
         _isNativeMode = true;
         _isSwitchingToNative = false;
-        _streamUrl = url; // update so _startMiniPlayer uses the real video URL
+        _streamUrl = url;
       });
 
-      // Hand the URL to the mini player service
+      // Tell service we're in native mode — mini player will use the global player
+      _miniPlayerService.setNativeMode(true);
       _miniPlayerService.updateVideoUrl(url);
     } catch (e) {
       debugPrint('Native switch failed: $e');
@@ -991,10 +999,10 @@ class _NativeStreamPlayerScreenState extends State<NativeStreamPlayerScreen>
     debugPrint('   Before - isActive: ${_miniPlayerService.isMiniPlayerActive}');
 
     _miniPlayerService.startMiniPlayer(
-
       title: title,
       streamUrl: _streamUrl!,
       mediaType: widget.mediaType,
+      nativeMode: _isNativeMode, // if native, mini player uses global player and audio continues
       season: _currentSeason,
       episode: _currentEpisode,
       tmdbId: widget.id,
@@ -1002,115 +1010,153 @@ class _NativeStreamPlayerScreenState extends State<NativeStreamPlayerScreen>
       position: _isNativeMode ? _player.state.position : Duration.zero,
       duration: _isNativeMode ? _player.state.duration : Duration.zero,
     );
-
-    debugPrint('   After - isActive: ${_miniPlayerService.isMiniPlayerActive}');
   }
   // ── Build ──────────────────────────────────────────────────────────────────
   @override
   Widget build(BuildContext context) {
-    return WillPopScope(
-      onWillPop: () async {
-        SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
-        SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
-        return true;
+    final isPortrait = MediaQuery.of(context).orientation == Orientation.portrait;
+
+    return PopScope(
+      canPop: true,
+      onPopInvokedWithResult: (didPop, _) {
+        if (didPop) {
+          if (_streamUrl != null && !_isResolving && !_isUnavailable) {
+            _startMiniPlayer();
+          }
+          SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
+          SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+        }
       },
       child: Scaffold(
         backgroundColor: Colors.black,
-        body: Stack(
-          children: [
-            SizedBox.expand(child: _buildVideoArea()),
-            if (_isNativeMode && !_isResolving && !_isUnavailable) _buildGestureLayer(),
-            if (_isResolving) _buildResolvingOverlay(),
-            if (_isUnavailable) _buildUnavailableOverlay(),
-            if (!_isLocked && !_isResolving && !_isUnavailable)
-              Positioned.fill(
-                child: FadeTransition(
-                  opacity: _controlsFade,
-                  child: SizedBox.expand(child: Stack(children: [_buildControlsOverlay()])),
-                ),
-              ),
-            if (_isLocked) _buildLockIndicator(),
-            if (_showBrightnessOverlay)
-              Positioned(left: 40, top: 0, bottom: 0, child: Center(child: _buildSliderIndicator(Icons.brightness_6, _brightness, Colors.yellowAccent))),
-            if (_showVolumeOverlay)
-              Positioned(right: 40, top: 0, bottom: 0, child: Center(child: _buildSliderIndicator(Icons.volume_up, _volume, Colors.white))),
-            if (widget.mediaType == 'tv' && _isEpisodePanelVisible)
-              GestureDetector(
-                onTap: _toggleEpisodePanel,
-                child: Container(
-                  color: Colors.black54,
-                  child: SlideTransition(
-                    position: _episodePanelSlide,
-                    child: Align(
-                      alignment: Alignment.bottomCenter,
-                      child: GestureDetector(
-                        onTap: () {},
-                        child: _buildEpisodePanel(),
+        body: GestureDetector(
+          // Swipe down to minimize to mini player
+          onVerticalDragUpdate: isPortrait
+              ? (details) {
+                  if (details.delta.dy > 0) {
+                    setState(() {
+                      _isDraggingDown = true;
+                      _dragOffset = (_dragOffset + details.delta.dy).clamp(0.0, 300.0);
+                    });
+                  }
+                }
+              : null,
+          onVerticalDragEnd: isPortrait
+              ? (details) {
+                  if (_dragOffset > 120 || (details.primaryVelocity ?? 0) > 400) {
+                    if (_streamUrl != null) _startMiniPlayer();
+                    Navigator.of(context).pop();
+                  } else {
+                    setState(() { _dragOffset = 0; _isDraggingDown = false; });
+                  }
+                }
+              : null,
+          child: Transform.translate(
+            offset: Offset(0, _dragOffset),
+            child: Stack(
+              children: [
+                SizedBox.expand(child: _buildVideoArea()),
+                if (_isNativeMode && !_isResolving && !_isUnavailable) _buildGestureLayer(),
+                if (_isResolving) _buildResolvingOverlay(),
+                if (_isUnavailable) _buildUnavailableOverlay(),
+                if (!_isLocked && !_isResolving && !_isUnavailable)
+                  Positioned.fill(
+                    child: FadeTransition(
+                      opacity: _controlsFade,
+                      child: SizedBox.expand(child: Stack(children: [_buildControlsOverlay()])),
+                    ),
+                  ),
+                if (_isLocked) _buildLockIndicator(),
+                if (_showBrightnessOverlay)
+                  Positioned(left: 40, top: 0, bottom: 0,
+                      child: Center(child: _buildSliderIndicator(Icons.brightness_6, _brightness, Colors.yellowAccent))),
+                if (_showVolumeOverlay)
+                  Positioned(right: 40, top: 0, bottom: 0,
+                      child: Center(child: _buildSliderIndicator(Icons.volume_up, _volume, Colors.white))),
+                if (widget.mediaType == 'tv' && _isEpisodePanelVisible)
+                  GestureDetector(
+                    onTap: _toggleEpisodePanel,
+                    child: Container(
+                      color: Colors.black54,
+                      child: SlideTransition(
+                        position: _episodePanelSlide,
+                        child: Align(
+                          alignment: Alignment.bottomCenter,
+                          child: GestureDetector(onTap: () {}, child: _buildEpisodePanel()),
+                        ),
                       ),
                     ),
                   ),
-                ),
-              ),
-            // Feature 4: Autoplay countdown overlay
-            if (_showAutoplayCountdown)
-              Positioned(
-                right: 16, bottom: 80,
-                child: Container(
-                  padding: const EdgeInsets.all(16),
-                  decoration: BoxDecoration(
-                    color: Colors.black87,
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: Colors.white24),
-                  ),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.end,
-                    children: [
-                      Text('Next episode in $_autoplayCountdown s',
-                          style: const TextStyle(color: Colors.white, fontSize: 13)),
-                      const SizedBox(height: 8),
-                      Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
+                // Autoplay countdown
+                if (_showAutoplayCountdown)
+                  Positioned(
+                    right: 16, bottom: 80,
+                    child: Container(
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: Colors.black87,
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: Colors.white24),
+                      ),
+                      child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.end, children: [
+                        Text('Next episode in $_autoplayCountdown s',
+                            style: const TextStyle(color: Colors.white, fontSize: 13)),
+                        const SizedBox(height: 8),
+                        Row(mainAxisSize: MainAxisSize.min, children: [
                           TextButton(
-                            onPressed: () {
-                              _autoplayTimer?.cancel();
-                              setState(() => _showAutoplayCountdown = false);
-                            },
+                            onPressed: () { _autoplayTimer?.cancel(); setState(() => _showAutoplayCountdown = false); },
                             child: const Text('Cancel', style: TextStyle(color: Colors.white54)),
                           ),
                           const SizedBox(width: 8),
                           ElevatedButton(
-                            onPressed: () {
-                              _autoplayTimer?.cancel();
-                              _playNextEpisode();
-                            },
+                            onPressed: () { _autoplayTimer?.cancel(); _playNextEpisode(); },
                             style: ElevatedButton.styleFrom(backgroundColor: AppTheme.accent),
                             child: const Text('Play Now',
                                 style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
                           ),
-                        ],
-                      ),
-                    ],
+                        ]),
+                      ]),
+                    ),
                   ),
-                ),
-              ),
-
-            if (!_isNativeMode && !_isResolving && !_isUnavailable && !_isControlsVisible)
-              Positioned(
-                top: 44, left: 16,
-                child: _floatingPill(
-                  onTap: _toggleControls,
-                  color: Colors.black.withValues(alpha: 0.72),
-                  borderColor: Colors.white24,
-                  child: const Row(mainAxisSize: MainAxisSize.min, children: [
-                    Icon(Icons.menu_rounded, color: Colors.white, size: 15),
-                    SizedBox(width: 6),
-                    Text('Menu', style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w600)),
-                  ]),
-                ),
-              ),
-          ],
+                // Seek overlay (double-tap ±10s indicator)
+                if (_showSeekOverlay)
+                  Positioned(
+                    right: _seekOverlayForward ? 40 : null,
+                    left:  _seekOverlayForward ? null : 40,
+                    top: 0, bottom: 0,
+                    child: Center(
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 16),
+                        decoration: BoxDecoration(color: Colors.black54, borderRadius: BorderRadius.circular(32)),
+                        child: Column(mainAxisSize: MainAxisSize.min, children: [
+                          Icon(
+                            _seekOverlayForward ? Icons.forward_10_rounded : Icons.replay_10_rounded,
+                            color: Colors.white, size: 36,
+                          ),
+                          const SizedBox(height: 4),
+                          Text(_seekOverlayForward ? '+10s' : '-10s',
+                              style: const TextStyle(color: Colors.white, fontSize: 12)),
+                        ]),
+                      ),
+                    ),
+                  ),
+                if (!_isNativeMode && !_isResolving && !_isUnavailable && !_isControlsVisible)
+                  Positioned(
+                    top: 44, left: 16,
+                    child: _floatingPill(
+                      onTap: _toggleControls,
+                      color: Colors.black.withValues(alpha: 0.72),
+                      borderColor: Colors.white24,
+                      child: const Row(mainAxisSize: MainAxisSize.min, children: [
+                        Icon(Icons.menu_rounded, color: Colors.white, size: 15),
+                        SizedBox(width: 6),
+                        Text('Menu', style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w600)),
+                      ]),
+                    ),
+                  ),
+              ],
+            ),
+          ),
         ),
       ),
     );
@@ -1197,7 +1243,7 @@ class _NativeStreamPlayerScreenState extends State<NativeStreamPlayerScreen>
           },
           onCreateWindow: (_, __) async => false,
           onLoadStart: (_, __) {
-            if (mounted) setState(() => _webLoading = true);
+            // Do not re-trigger loading overlay on JS-triggered sub-navigations
           },
           onLoadStop: (ctrl, _) async {
             if (mounted) {
@@ -1396,7 +1442,8 @@ class _NativeStreamPlayerScreenState extends State<NativeStreamPlayerScreen>
           },
         ),
 
-        if (_webLoading) _buildWebLoadingOverlay(),
+        // No loading overlay — let the embed page show immediately.
+        // The _isResolving overlay above covers the pre-URL phase.
       ]),
     );
   }
@@ -1574,67 +1621,6 @@ class _NativeStreamPlayerScreenState extends State<NativeStreamPlayerScreen>
   }
 
   // ── Web loading overlay ────────────────────────────────────────────────────
-  Widget _buildWebLoadingOverlay() {
-    return Container(
-      color: Colors.black.withValues(alpha: 0.92),
-      child: Center(
-        child: Column(mainAxisSize: MainAxisSize.min, children: [
-          SizedBox(
-            width: 52, height: 52,
-            child: CircularProgressIndicator(
-                color: AppTheme.accent, strokeWidth: 2.5),
-          ),
-          const SizedBox(height: 18),
-          const Text(
-            'Loading your stream…',
-            style: TextStyle(
-                color: Colors.white70,
-                fontSize: 13,
-                fontWeight: FontWeight.w500),
-          ),
-          const SizedBox(height: 24),
-          if (_mirrors.isNotEmpty)
-            SizedBox(
-              height: 34,
-              child: ListView.builder(
-                scrollDirection: Axis.horizontal,
-                shrinkWrap: true,
-                padding: const EdgeInsets.symmetric(horizontal: 24),
-                itemCount: _mirrors.length,
-                itemBuilder: (_, i) {
-                  final sel = i == _webMirrorIndex;
-                  return GestureDetector(
-                    onTap: () => _switchMirror(i),
-                    child: AnimatedContainer(
-                      duration: const Duration(milliseconds: 180),
-                      margin: const EdgeInsets.only(right: 8),
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 12, vertical: 6),
-                      decoration: BoxDecoration(
-                        color: sel
-                            ? AppTheme.accent
-                            : Colors.white.withValues(alpha: 0.08),
-                        borderRadius: BorderRadius.circular(16),
-                        border: Border.all(
-                            color: sel ? AppTheme.accent : Colors.white12),
-                      ),
-                      child: Text(_mirrors[i]['name']!,
-                          style: TextStyle(
-                            color: sel ? Colors.black : Colors.white60,
-                            fontSize: 11,
-                            fontWeight:
-                            sel ? FontWeight.bold : FontWeight.normal,
-                          )),
-                    ),
-                  );
-                },
-              ),
-            ),
-        ]),
-      ),
-    );
-  }
-
   // ── Gesture layer (native) ─────────────────────────────────────────────────
   Widget _buildGestureLayer() {
     return Row(children: [
@@ -1647,7 +1633,7 @@ class _NativeStreamPlayerScreenState extends State<NativeStreamPlayerScreen>
           child: GestureDetector(
             behavior: HitTestBehavior.translucent,
             onTap: _toggleControls,
-            onDoubleTap: () => _seekRelative(-10),
+            onDoubleTap: () { _seekRelative(-10); _showSeekIndicator(false); },
             onVerticalDragUpdate: (d) => _handleVerticalDrag(d, true),
             onVerticalDragEnd: (_) => _handleVerticalDragEnd(true),
           ),
@@ -1662,7 +1648,7 @@ class _NativeStreamPlayerScreenState extends State<NativeStreamPlayerScreen>
           child: GestureDetector(
             behavior: HitTestBehavior.translucent,
             onTap: _toggleControls,
-            onDoubleTap: () => _seekRelative(10),
+            onDoubleTap: () { _seekRelative(10); _showSeekIndicator(true); },
             onVerticalDragUpdate: (d) => _handleVerticalDrag(d, false),
             onVerticalDragEnd: (_) => _handleVerticalDragEnd(false),
           ),
@@ -2394,5 +2380,16 @@ class _NativeStreamPlayerScreenState extends State<NativeStreamPlayerScreen>
     final m = d.inMinutes.remainder(60).toString().padLeft(2, '0');
     final s = d.inSeconds.remainder(60).toString().padLeft(2, '0');
     return h > 0 ? '$h:$m:$s' : '$m:$s';
+  }
+
+  void _showSeekIndicator(bool forward) {
+    setState(() {
+      _showSeekOverlay    = true;
+      _seekOverlayForward = forward;
+    });
+    _seekOverlayTimer?.cancel();
+    _seekOverlayTimer = Timer(const Duration(milliseconds: 600), () {
+      if (mounted) setState(() => _showSeekOverlay = false);
+    });
   }
 }
