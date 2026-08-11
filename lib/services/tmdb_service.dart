@@ -966,7 +966,7 @@ class TMDBService extends ChangeNotifier {
     try {
       final res = await http
           .get(Uri.parse(
-          '${_baseUrl}person/$personId?api_key=${AppConfig.tmdbApiKey}&append_to_response=combined_credits'))
+          '$_baseUrl/person/$personId?api_key=${AppConfig.tmdbApiKey}&append_to_response=combined_credits'))
           .timeout(const Duration(seconds: 15));
       if (res.statusCode == 200) return json.decode(res.body) as Map<String, dynamic>;
     } catch (e) {
