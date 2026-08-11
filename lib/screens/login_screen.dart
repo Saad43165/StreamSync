@@ -1,3 +1,4 @@
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
@@ -201,7 +202,7 @@ class _LoginScreenState extends State<LoginScreen>
                               width: 60,
                               height: 60,
                               decoration: BoxDecoration(
-                                color: AppTheme.accent.withOpacity(0.15),
+                                color: AppTheme.accent.withValues(alpha: 0.15),
                                 shape: BoxShape.circle,
                               ),
                             ),
@@ -237,8 +238,8 @@ class _LoginScreenState extends State<LoginScreen>
                         duration: const Duration(milliseconds: 300),
                         child: Text(
                           _isSignUp
-                              ? 'Sign up to sync your watchlist & history'
-                              : 'Sign in to access your synced profile data',
+                              ? 'Your profile is stored on this device.'
+                              : 'Your profile is stored on this device.',
                           key: ValueKey('sub_$_isSignUp'),
                           textAlign: TextAlign.center,
                           style: const TextStyle(
@@ -364,6 +365,15 @@ class _LoginScreenState extends State<LoginScreen>
                                         fontWeight: FontWeight.w600,
                                         decoration: TextDecoration.underline,
                                       ),
+                                      recognizer: TapGestureRecognizer()
+                                        ..onTap = () => showDialog(
+                                          context: context,
+                                          builder: (_) => AlertDialog(
+                                            title: const Text('Terms of Service'),
+                                            content: const Text('Full terms will be available at launch. By using StreamSync you agree to use it for personal, non-commercial viewing only.'),
+                                            actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('OK'))],
+                                          ),
+                                        ),
                                     ),
                                     const TextSpan(text: ' and '),
                                     TextSpan(
@@ -373,6 +383,15 @@ class _LoginScreenState extends State<LoginScreen>
                                         fontWeight: FontWeight.w600,
                                         decoration: TextDecoration.underline,
                                       ),
+                                      recognizer: TapGestureRecognizer()
+                                        ..onTap = () => showDialog(
+                                          context: context,
+                                          builder: (_) => AlertDialog(
+                                            title: const Text('Privacy Policy'),
+                                            content: const Text('StreamSync stores all data locally on your device. No personal data is transmitted to external servers.'),
+                                            actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('OK'))],
+                                          ),
+                                        ),
                                     ),
                                   ],
                                 ),
@@ -391,12 +410,12 @@ class _LoginScreenState extends State<LoginScreen>
                           borderRadius: BorderRadius.circular(14),
                           gradient: LinearGradient(
                             colors: _isSignUp
-                                ? [AppTheme.accent, AppTheme.accent.withOpacity(0.8)]
+                                ? [AppTheme.accent, AppTheme.accent.withValues(alpha: 0.8)]
                                 : [AppTheme.accent, AppTheme.accent],
                           ),
                           boxShadow: [
                             BoxShadow(
-                              color: AppTheme.accent.withOpacity(0.3),
+                              color: AppTheme.accent.withValues(alpha: 0.3),
                               blurRadius: 12,
                               offset: const Offset(0, 4),
                             ),
@@ -533,11 +552,11 @@ class _LoginScreenState extends State<LoginScreen>
         ),
         enabledBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(12),
-          borderSide: BorderSide(color: Colors.white.withOpacity(0.06)),
+          borderSide: BorderSide(color: Colors.white.withValues(alpha: 0.06)),
         ),
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(12),
-          borderSide: BorderSide(color: AppTheme.accent.withOpacity(0.5), width: 1.5),
+          borderSide: BorderSide(color: AppTheme.accent.withValues(alpha: 0.5), width: 1.5),
         ),
         errorBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(12),

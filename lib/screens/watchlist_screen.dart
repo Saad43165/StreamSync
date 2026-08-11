@@ -48,13 +48,13 @@ class WatchlistScreen extends StatelessWidget {
               width: 80,
               height: 80,
               decoration: BoxDecoration(
-                color: AppTheme.accent.withOpacity(0.1),
+                color: AppTheme.accent.withValues(alpha: 0.1),
                 shape: BoxShape.circle,
               ),
               child: Icon(
                 Icons.bookmark_outline,
                 size: 40,
-                color: AppTheme.accent.withOpacity(0.5),
+                color: AppTheme.accent.withValues(alpha: 0.5),
               ),
             ),
             const SizedBox(height: 20),
@@ -117,6 +117,7 @@ class WatchlistScreen extends StatelessWidget {
                       builder: (context) => DetailsScreen(
                         id: item['id'],
                         mediaType: item['media_type'] ?? 'movie',
+                        heroTag: 'watchlist_poster_${item['id']}',
                       ),
                     ),
                   );
@@ -194,7 +195,7 @@ class _WatchlistCard extends StatelessWidget {
           alignment: Alignment.centerRight,
           padding: const EdgeInsets.only(right: 20),
           decoration: BoxDecoration(
-            color: Colors.redAccent.withOpacity(0.2),
+            color: Colors.redAccent.withValues(alpha: 0.2),
             borderRadius: BorderRadius.circular(14),
           ),
           child: const Icon(Icons.delete_outline, color: Colors.redAccent),
@@ -206,7 +207,7 @@ class _WatchlistCard extends StatelessWidget {
             decoration: BoxDecoration(
               color: AppTheme.surface,
               borderRadius: BorderRadius.circular(14),
-              border: Border.all(color: Colors.white.withOpacity(0.06)),
+              border: Border.all(color: Colors.white.withValues(alpha: 0.06)),
             ),
             child: Padding(
               padding: const EdgeInsets.all(12),
@@ -234,14 +235,14 @@ class _WatchlistCard extends StatelessWidget {
                           ),
                           errorWidget: (_, __, ___) => Container(
                             color: Colors.white12,
-                            child: Icon(Icons.movie, color: Colors.white.withOpacity(0.3)),
+                            child: Icon(Icons.movie, color: Colors.white.withValues(alpha: 0.3)),
                           ),
                           memCacheWidth: 112,
                         ),
                       )
                           : Container(
                         color: Colors.white12,
-                        child: Icon(Icons.movie, color: Colors.white.withOpacity(0.3)),
+                        child: Icon(Icons.movie, color: Colors.white.withValues(alpha: 0.3)),
                       ),
                     ),
                   ),
@@ -306,9 +307,9 @@ class _Badge extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
       decoration: BoxDecoration(
-        color: color.withOpacity(0.12),
+        color: color.withValues(alpha: 0.12),
         borderRadius: BorderRadius.circular(5),
-        border: Border.all(color: color.withOpacity(0.3)),
+        border: Border.all(color: color.withValues(alpha: 0.3)),
       ),
       child: Text(text, style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: color, letterSpacing: 0.3)),
     );

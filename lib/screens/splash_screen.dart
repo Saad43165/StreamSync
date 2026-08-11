@@ -1,8 +1,10 @@
 import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../theme/app_theme.dart';
 import 'package:streamsync/main.dart';
+import 'login_screen.dart';
 
 class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key});
@@ -61,22 +63,25 @@ class _SplashScreenState extends State<SplashScreen> with TickerProviderStateMix
 
     _logoController.forward();
 
-    // Navigate after delay
+    // Navigate after delay — show onboarding (LoginScreen) on first launch
     Future.delayed(const Duration(milliseconds: 2800), () async {
-      if (mounted) {
-        await _fadeController.forward();
-        if (mounted) {
-          SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
-          Navigator.of(context).pushReplacement(
-            PageRouteBuilder(
-              pageBuilder: (_, __, ___) => const MainNavigationShell(),
-              transitionDuration: const Duration(milliseconds: 400),
-              transitionsBuilder: (_, anim, __, child) =>
-                FadeTransition(opacity: anim, child: child),
-            ),
-          );
-        }
-      }
+      if (!mounted) return;
+      await _fadeController.forward();
+      if (!mounted) return;
+      SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+      final prefs = await SharedPreferences.getInstance();
+      final seenOnboarding = prefs.getBool('streamsync_seen_onboarding') ?? false;
+      if (!mounted) return;
+      Navigator.of(context).pushReplacement(
+        PageRouteBuilder(
+          pageBuilder: (_, __, ___) => seenOnboarding
+              ? const MainNavigationShell()
+              : const LoginScreen(showSkipButton: true),
+          transitionDuration: const Duration(milliseconds: 400),
+          transitionsBuilder: (_, anim, __, child) =>
+              FadeTransition(opacity: anim, child: child),
+        ),
+      );
     });
   }
 
@@ -185,7 +190,7 @@ class _SplashScreenState extends State<SplashScreen> with TickerProviderStateMix
                                       colors: [Colors.white, AppTheme.accent.withValues(alpha: 0.9)],
                                     ).createShader(bounds),
                                     child: const Text(
-                                      'CineSync',
+                                      'StreamSync',
                                       style: TextStyle(
                                         fontSize: 42,
                                         fontWeight: FontWeight.w900,

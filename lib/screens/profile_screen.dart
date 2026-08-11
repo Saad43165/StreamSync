@@ -8,6 +8,7 @@ import '../theme/app_theme.dart';
 import 'settings_screen.dart';
 import 'details_screen.dart';
 import 'downloads_screen.dart';
+import 'native_stream_player_screen.dart';
 
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
@@ -345,6 +346,7 @@ class _ProfileScreenState extends State<ProfileScreen>
                   id: item['id'],
                   mediaType: item['media_type'] ?? 'movie',
                   posterUrl: poster.isNotEmpty ? poster : null,
+                  heroTag: 'profile_watchlist_${item['id']}',
                 ),
               ),
             );
@@ -587,7 +589,24 @@ class _ProfileScreenState extends State<ProfileScreen>
             ),
             trailing: IconButton(
               icon: const Icon(Icons.play_circle_filled_rounded, color: AppTheme.accent, size: 32),
-              onPressed: () {},
+              onPressed: () {
+                final localPath = item['local_file_path'] as String?;
+                Navigator.push(
+                  ctx,
+                  MaterialPageRoute(
+                    builder: (_) => NativeStreamPlayerScreen(
+                      id: item['id'] as int,
+                      title: title,
+                      mediaType: mediaType,
+                      season: (item['season'] as int?) ?? 1,
+                      episode: (item['episode'] as int?) ?? 1,
+                      isOffline: localPath != null,
+                      localFilePath: localPath,
+                      posterPath: _posterUrl(posterPath),
+                    ),
+                  ),
+                );
+              },
             ),
           ),
         );

@@ -170,7 +170,7 @@ class DownloadService extends ChangeNotifier {
         result = null;
       }
 
-      if (result == null || !result.isNative) {
+      if (result == null || result.url.isEmpty) {
         _showOneShot(id, '❌ No downloadable source found.');
         return;
       }

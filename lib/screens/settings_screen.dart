@@ -46,8 +46,19 @@ class _SettingsScreenState extends State<SettingsScreen> {
       int downloadsBytes = 0;
       int cacheBytes = 0;
 
-      if (await docDir.exists()) {
-        await for (final file in docDir.list(recursive: true, followLinks: false)) {
+      // Scan directories that DownloadService uses: StreamSync/ subfolder
+      // (also covers Android external storage path)
+      final List<Directory> dirsToScan = [docDir];
+      if (Platform.isAndroid) {
+        try {
+          final ext = await getExternalStorageDirectory();
+          if (ext != null) dirsToScan.add(ext);
+        } catch (_) {}
+      }
+
+      for (final dir in dirsToScan) {
+        if (!await dir.exists()) continue;
+        await for (final file in dir.list(recursive: true, followLinks: false)) {
           if (!_safeMounted) return;
           if (file is File) {
             try {
@@ -333,7 +344,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                 ),
                                 child: CircleAvatar(
                                   radius: 24,
-                                  backgroundColor: profileColor.withOpacity(0.25),
+                                  backgroundColor: profileColor.withValues(alpha: 0.25),
                                   child: Text(
                                     profile.substring(0, 1),
                                     style: TextStyle(color: profileColor, fontSize: 18, fontWeight: FontWeight.bold),
@@ -480,7 +491,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 _infotile(
                   icon: Icons.info_outline_rounded,
                   label: 'App Release Version',
-                  trailing: const Text('2.0.0 Premium', style: TextStyle(color: AppTheme.textSecondary, fontSize: 12, fontWeight: FontWeight.bold)),
+                  trailing: const Text('3.0.0', style: TextStyle(color: AppTheme.textSecondary, fontSize: 12, fontWeight: FontWeight.bold)),
                 ),
                 _divider(),
                 _infotile(
@@ -542,7 +553,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           Container(
             padding: const EdgeInsets.all(10),
             decoration: BoxDecoration(
-              color: iconColor.withOpacity(0.1),
+              color: iconColor.withValues(alpha: 0.1),
               shape: BoxShape.circle,
             ),
             child: Icon(icon, color: iconColor, size: 20),
@@ -612,8 +623,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
               width: 44, height: 24, padding: const EdgeInsets.all(2.5),
               decoration: BoxDecoration(
                 borderRadius: BorderRadius.circular(12),
-                color: value ? AppTheme.accent.withOpacity(0.2) : Colors.white.withOpacity(0.06),
-                border: Border.all(color: value ? AppTheme.accent : Colors.white.withOpacity(0.12), width: 1.0),
+                color: value ? AppTheme.accent.withValues(alpha: 0.2) : Colors.white.withValues(alpha: 0.06),
+                border: Border.all(color: value ? AppTheme.accent : Colors.white.withValues(alpha: 0.12), width: 1.0),
               ),
               child: AnimatedAlign(
                 duration: const Duration(milliseconds: 250),
@@ -623,7 +634,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   decoration: BoxDecoration(
                     color: value ? AppTheme.accent : Colors.white54,
                     shape: BoxShape.circle,
-                    boxShadow: value ? [BoxShadow(color: AppTheme.accent.withOpacity(0.5), blurRadius: 4)] : null,
+                    boxShadow: value ? [BoxShadow(color: AppTheme.accent.withValues(alpha: 0.5), blurRadius: 4)] : null,
                   ),
                 ),
               ),
@@ -647,7 +658,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           begin: Alignment.topLeft, end: Alignment.bottomRight,
         ),
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: isPremium ? Colors.tealAccent.withOpacity(0.25) : AppTheme.secondaryAccent.withOpacity(0.3), width: 1),
+        border: Border.all(color: isPremium ? Colors.tealAccent.withValues(alpha: 0.25) : AppTheme.secondaryAccent.withValues(alpha: 0.3), width: 1),
       ),
       padding: const EdgeInsets.all(18),
       child: Column(
@@ -663,7 +674,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   children: [
                     Text(isPremium ? 'Premium Pro Member' : 'Unlock Premium Access', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14)),
                     Text(isPremium ? 'Lifetime License Activated • No Ads' : 'Secure sandbox checkout simulator',
-                        style: TextStyle(color: isPremium ? Colors.tealAccent.withOpacity(0.75) : AppTheme.secondaryAccent.withOpacity(0.75), fontSize: 11)),
+                        style: TextStyle(color: isPremium ? Colors.tealAccent.withValues(alpha: 0.75) : AppTheme.secondaryAccent.withValues(alpha: 0.75), fontSize: 11)),
                   ],
                 ),
               ),
@@ -712,7 +723,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 const Icon(Icons.security_rounded, color: AppTheme.accent, size: 40), const SizedBox(height: 12),
                 const Text('Secure Checkout Simulator', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16)), const SizedBox(height: 6),
                 const Text('This is a sandboxed payment verification gate designed for Play Store verification testing.', textAlign: TextAlign.center, style: TextStyle(color: AppTheme.textSecondary, fontSize: 11, height: 1.4)), const SizedBox(height: 20),
-                Container(padding: const EdgeInsets.all(16), decoration: BoxDecoration(color: Colors.white.withOpacity(0.03), borderRadius: BorderRadius.circular(12), border: Border.all(color: Colors.white.withOpacity(0.06))),
+                Container(padding: const EdgeInsets.all(16), decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.03), borderRadius: BorderRadius.circular(12), border: Border.all(color: Colors.white.withValues(alpha: 0.06))),
                     child: const Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
                       Text('StreamSync Pro (Lifetime license)', style: TextStyle(color: Colors.white70, fontSize: 12, fontWeight: FontWeight.bold)),
                       Text('\$1.99', style: TextStyle(color: AppTheme.accent, fontWeight: FontWeight.bold, fontSize: 13)),
@@ -792,7 +803,7 @@ class _BenefitChip extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-      decoration: BoxDecoration(color: AppTheme.secondaryAccent.withOpacity(0.1), borderRadius: BorderRadius.circular(20), border: Border.all(color: AppTheme.secondaryAccent.withOpacity(0.2))),
+      decoration: BoxDecoration(color: AppTheme.secondaryAccent.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(20), border: Border.all(color: AppTheme.secondaryAccent.withValues(alpha: 0.2))),
       child: Text('✓ $label', style: const TextStyle(color: AppTheme.secondaryAccent, fontSize: 10, fontWeight: FontWeight.w600)),
     );
   }

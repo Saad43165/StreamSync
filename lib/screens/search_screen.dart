@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:provider/provider.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import '../services/tmdb_service.dart';
@@ -43,13 +44,7 @@ class _SearchScreenState extends State<SearchScreen> {
   int _selectedIndex = 0;
   bool _isOffline = false;
 
-  final List<String> _recentSearches = [
-    'Avengers',
-    'Superman',
-    'Avatar',
-    'Batman',
-    'Stranger Things',
-  ];
+  List<String> _recentSearches = [];
 
   // ── Image URL helper ──────────────────────────────────────────────────────
   static String _posterUrl(String? path) {
@@ -67,6 +62,21 @@ class _SearchScreenState extends State<SearchScreen> {
         _searchFocusNode.unfocus();
       }
     });
+    _loadRecentSearches();
+  }
+
+  Future<void> _loadRecentSearches() async {
+    final prefs = await SharedPreferences.getInstance();
+    if (mounted) {
+      setState(() {
+        _recentSearches = prefs.getStringList('recent_searches') ?? [];
+      });
+    }
+  }
+
+  Future<void> _saveRecentSearches() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setStringList('recent_searches', _recentSearches);
   }
 
   @override
@@ -83,10 +93,11 @@ class _SearchScreenState extends State<SearchScreen> {
     setState(() {
       _recentSearches.remove(query);
       _recentSearches.insert(0, query);
-      if (_recentSearches.length > 8) {
-        _recentSearches.removeLast();
+      if (_recentSearches.length > 10) {
+        _recentSearches = _recentSearches.take(10).toList();
       }
     });
+    _saveRecentSearches();
   }
 
   Future<void> _runSearch(String query) async {
@@ -360,9 +371,9 @@ class _SearchScreenState extends State<SearchScreen> {
       margin: const EdgeInsets.only(bottom: 14),
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
       decoration: BoxDecoration(
-        color: Colors.redAccent.withOpacity(0.1),
+        color: Colors.redAccent.withValues(alpha: 0.1),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.redAccent.withOpacity(0.35)),
+        border: Border.all(color: Colors.redAccent.withValues(alpha: 0.35)),
       ),
       child: Row(
         children: [
@@ -419,7 +430,7 @@ class _SearchScreenState extends State<SearchScreen> {
               child: Container(
                 padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                 decoration: BoxDecoration(
-                  color: Colors.white.withOpacity(0.05),
+                  color: Colors.white.withValues(alpha: 0.05),
                   borderRadius: BorderRadius.circular(20),
                   border: Border.all(color: Colors.white10),
                 ),
@@ -513,6 +524,7 @@ class _SearchScreenState extends State<SearchScreen> {
                     id: item['id'],
                     mediaType:
                     item['media_type'] ?? (item['title'] != null ? 'movie' : 'tv'),
+                    heroTag: 'poster_${item['id']}_${item['media_type'] ?? ''}',
                   ),
                 ),
               );
@@ -554,7 +566,7 @@ class _PosterCard extends StatelessWidget {
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(16),
             color: AppTheme.surface,
-            border: Border.all(color: Colors.white.withOpacity(0.05)),
+            border: Border.all(color: Colors.white.withValues(alpha: 0.05)),
           ),
           child: ClipRRect(
             borderRadius: BorderRadius.circular(16),
@@ -595,7 +607,7 @@ class _PosterCard extends StatelessWidget {
                               color: (mediaType == 'tv'
                                   ? Colors.blueAccent
                                   : Colors.purpleAccent)
-                                  .withOpacity(0.85),
+                                  .withValues(alpha: 0.85),
                               borderRadius: BorderRadius.circular(6),
                             ),
                             child: Text(
@@ -619,10 +631,10 @@ class _PosterCard extends StatelessWidget {
                               padding: const EdgeInsets.symmetric(
                                   horizontal: 6, vertical: 3),
                               decoration: BoxDecoration(
-                                color: Colors.black.withOpacity(0.72),
+                                color: Colors.black.withValues(alpha: 0.72),
                                 borderRadius: BorderRadius.circular(6),
                                 border: Border.all(
-                                    color: AppTheme.accent.withOpacity(0.4)),
+                                    color: AppTheme.accent.withValues(alpha: 0.4)),
                               ),
                               child: Row(
                                 mainAxisSize: MainAxisSize.min,

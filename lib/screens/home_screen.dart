@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 import 'dart:ui';
+import 'package:flutter/foundation.dart' show listEquals;
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:provider/provider.dart';
@@ -161,7 +162,7 @@ class _HomeScreenState extends State<HomeScreen>
 
   Future<void> _checkConnection() async {
     try {
-      final result = await InternetAddress.lookup('google.com')
+      final result = await InternetAddress.lookup('api.themoviedb.org')
           .timeout(const Duration(seconds: 4));
       if (mounted) {
         setState(() =>
@@ -580,20 +581,6 @@ class _HomeScreenState extends State<HomeScreen>
   // DRAWER
   // ─────────────────────────────────────────────────────────────────────────
   Widget _buildDrawer(BuildContext context) {
-    // FIX 9: Drawer reads DatabaseService once here, not via Provider.of
-    //        without listen:false
-    final db = context.read<DatabaseService>();
-    final isPremium  = db.isPremium;
-    final isLoggedIn = db.isLoggedIn;
-    final username   = isLoggedIn ? db.username : db.currentProfile;
-    final sub        = isLoggedIn
-        ? db.email
-        : (isPremium ? 'Premium Active' : 'Free Account');
-
-    Color profileColor = AppTheme.accent;
-    if (db.currentProfile == 'Family') profileColor = Colors.blueAccent;
-    if (db.currentProfile == 'Kids')   profileColor = Colors.greenAccent;
-
     void navTo(Widget screen) {
       Navigator.pop(context);
       Navigator.push(context,
@@ -604,60 +591,79 @@ class _HomeScreenState extends State<HomeScreen>
       backgroundColor: _surface,
       child: SafeArea(
         child: Column(children: [
-          // Profile card
-          _DrawerProfileCard(
-            username: username,
-            sub: sub,
-            profileColor: profileColor,
-            isPremium: isPremium,
+          // Profile card — wrapped in Consumer so it reacts to profile/premium changes
+          Consumer<DatabaseService>(
+            builder: (context, db, _) {
+              final isPremium  = db.isPremium;
+              final isLoggedIn = db.isLoggedIn;
+              final username   = isLoggedIn ? db.username : db.currentProfile;
+              final sub        = isLoggedIn
+                  ? db.email
+                  : (isPremium ? 'Premium Active' : 'Free Account');
+              Color profileColor = AppTheme.accent;
+              if (db.currentProfile == 'Family') profileColor = Colors.blueAccent;
+              if (db.currentProfile == 'Kids')   profileColor = Colors.greenAccent;
+              return _DrawerProfileCard(
+                username: username,
+                sub: sub,
+                profileColor: profileColor,
+                isPremium: isPremium,
+              );
+            },
           ),
 
           Expanded(
-            child: SingleChildScrollView(
-              child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const _DrawerLabel('Discover'),
-                    _DrawerItem(
-                      icon: Icons.calendar_month_rounded,
-                      label: 'Upcoming Releases',
-                      color: Colors.amberAccent,
-                      onTap: () => navTo(const UpcomingReleasesScreen()),
-                    ),
-                    _DrawerItem(
-                      icon: Icons.history_rounded,
-                      label: 'Watch History',
-                      color: Colors.lightBlueAccent,
-                      onTap: () => navTo(const WatchHistoryScreen()),
-                    ),
-                    _DrawerItem(
-                      icon: Icons.download_for_offline_rounded,
-                      label: 'Offline Downloads',
-                      color: Colors.greenAccent,
-                      onTap: () => navTo(const DownloadsScreen()),
-                    ),
-                    const _DrawerDivider(),
-                    const _DrawerLabel('Account'),
-                    _DrawerItem(
-                      icon: Icons.settings_rounded,
-                      label: 'Settings',
-                      color: _dimText,
-                      onTap: () => navTo(const SettingsScreen()),
-                    ),
-                    if (!isLoggedIn)
-                      _DrawerItem(
-                        icon: Icons.login_rounded,
-                        label: 'Sign In / Sign Up',
-                        color: AppTheme.accent,
-                        onTap: () => navTo(
-                            const LoginScreen(showSkipButton: false)),
-                      ),
-                    const _DrawerDivider(),
-                    _DrawerUpgradeCard(
-                      isPremium: isPremium,
-                      onTap: () => navTo(const SettingsScreen()),
-                    ),
-                  ]),
+            child: Consumer<DatabaseService>(
+              builder: (context, db, _) {
+                final isLoggedIn = db.isLoggedIn;
+                final isPremium  = db.isPremium;
+                return SingleChildScrollView(
+                  child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const _DrawerLabel('Discover'),
+                        _DrawerItem(
+                          icon: Icons.calendar_month_rounded,
+                          label: 'Upcoming Releases',
+                          color: Colors.amberAccent,
+                          onTap: () => navTo(const UpcomingReleasesScreen()),
+                        ),
+                        _DrawerItem(
+                          icon: Icons.history_rounded,
+                          label: 'Watch History',
+                          color: Colors.lightBlueAccent,
+                          onTap: () => navTo(const WatchHistoryScreen()),
+                        ),
+                        _DrawerItem(
+                          icon: Icons.download_for_offline_rounded,
+                          label: 'Offline Downloads',
+                          color: Colors.greenAccent,
+                          onTap: () => navTo(const DownloadsScreen()),
+                        ),
+                        const _DrawerDivider(),
+                        const _DrawerLabel('Account'),
+                        _DrawerItem(
+                          icon: Icons.settings_rounded,
+                          label: 'Settings',
+                          color: _dimText,
+                          onTap: () => navTo(const SettingsScreen()),
+                        ),
+                        if (!isLoggedIn)
+                          _DrawerItem(
+                            icon: Icons.login_rounded,
+                            label: 'Sign In / Sign Up',
+                            color: AppTheme.accent,
+                            onTap: () => navTo(
+                                const LoginScreen(showSkipButton: false)),
+                          ),
+                        const _DrawerDivider(),
+                        _DrawerUpgradeCard(
+                          isPremium: isPremium,
+                          onTap: () => navTo(const SettingsScreen()),
+                        ),
+                      ]),
+                );
+              },
             ),
           ),
 
@@ -667,7 +673,7 @@ class _HomeScreenState extends State<HomeScreen>
               Icon(Icons.movie_filter_rounded,
                   color: Color(0x1FFFFFFF), size: 12),
               SizedBox(width: 6),
-              Text('CineSync  v1.2.0',
+              Text('StreamSync  v3.0.0',
                   style: TextStyle(
                       color: Color(0x1AFFFFFF), fontSize: 11)),
             ]),
@@ -678,12 +684,14 @@ class _HomeScreenState extends State<HomeScreen>
   }
 
   void _pushDetails(BuildContext context, dynamic item,
-      {String? mediaType, String? posterUrl}) {
+      {String? mediaType, String? posterUrl, String? heroTag}) {
+    final mt = mediaType ?? item['media_type'] ?? 'movie';
     Navigator.push(context, MaterialPageRoute(
         builder: (_) => DetailsScreen(
           id: item['id'],
-          mediaType: mediaType ?? item['media_type'] ?? 'movie',
+          mediaType: mt,
           posterUrl: posterUrl,
+          heroTag: heroTag ?? 'home_poster_${item['id']}_$mt',
         )));
   }
 }
@@ -722,16 +730,26 @@ class _TMDBSnapshot {
     return other is _TMDBSnapshot &&
         other.isLoading == isLoading &&
         other.hasApiKey == hasApiKey &&
-        identical(other.trending, trending) &&
-        identical(other.movies, movies) &&
-        identical(other.series, series);
-    // identical() on list references — rebuild only when the list
-    // object itself is replaced (which happens after a fresh fetch)
+        listEquals(other.trending, trending) &&
+        listEquals(other.movies, movies) &&
+        listEquals(other.series, series) &&
+        listEquals(other.netflix, netflix) &&
+        listEquals(other.prime, prime) &&
+        listEquals(other.disney, disney) &&
+        listEquals(other.actionMovies, actionMovies) &&
+        listEquals(other.comedyMovies, comedyMovies) &&
+        listEquals(other.scifiMovies, scifiMovies) &&
+        listEquals(other.horrorMovies, horrorMovies) &&
+        listEquals(other.bollywood, bollywood) &&
+        listEquals(other.pakistani, pakistani) &&
+        listEquals(other.upcoming, upcoming);
   }
 
   @override
   int get hashCode => Object.hash(isLoading, hasApiKey,
-      trending, movies, series);
+      trending, movies, series, netflix, prime, disney,
+      actionMovies, comedyMovies, scifiMovies, horrorMovies,
+      bollywood, pakistani, upcoming);
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -763,7 +781,7 @@ class _CineSyncLogo extends StatelessWidget {
     return RichText(
       text: TextSpan(children: [
         TextSpan(
-          text: 'Cine',
+          text: 'Stream',
           style: TextStyle(
             fontSize: fontSize,
             fontWeight: FontWeight.w300,
@@ -1142,7 +1160,7 @@ class _ContinueWatchingSection extends StatelessWidget {
         title: 'Continue Watching',
         trailing: GestureDetector(
           onTap: () {
-            db.clearDatabase();
+            db.clearHistory();
             ScaffoldMessenger.of(context).showSnackBar(
                 const SnackBar(content: Text('Watch history cleared.')));
           },
@@ -1398,7 +1416,7 @@ class _PosterRow extends StatelessWidget {
                   children: [
                     Expanded(
                       child: Hero(
-                        tag: 'poster_${item['id']}',
+                        tag: 'home_poster_${item['id']}_${item['media_type'] ?? 'movie'}',
                         child: ClipRRect(
                           borderRadius: BorderRadius.circular(12),
                           child: Stack(fit: StackFit.expand, children: [
@@ -1805,7 +1823,7 @@ class _ApiKeyWarning extends StatelessWidget {
                 const SizedBox(height: 2),
                 Text('Add a TMDB API key in config.dart for live data.',
                     style: TextStyle(
-                        color: Colors.white.withOpacity(0.5),
+                        color: Colors.white.withValues(alpha: 0.5),
                         fontSize: 11)),
               ]),
         ),
@@ -1838,19 +1856,19 @@ class _DrawerProfileCard extends StatelessWidget {
       decoration: BoxDecoration(
         gradient: LinearGradient(
           colors: [
-            profileColor.withOpacity(0.22),
-            profileColor.withOpacity(0.06),
+            profileColor.withValues(alpha: 0.22),
+            profileColor.withValues(alpha: 0.06),
           ],
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
         ),
         borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: profileColor.withOpacity(0.25)),
+        border: Border.all(color: profileColor.withValues(alpha: 0.25)),
       ),
       child: Row(children: [
         CircleAvatar(
           radius: 24,
-          backgroundColor: profileColor.withOpacity(0.25),
+          backgroundColor: profileColor.withValues(alpha: 0.25),
           child: Text(
             username.substring(0, 1).toUpperCase(),
             style: TextStyle(
@@ -1943,7 +1961,7 @@ class _DrawerItem extends StatelessWidget {
           leading: Container(
             width: 34, height: 34,
             decoration: BoxDecoration(
-              color: color.withOpacity(0.1),
+              color: color.withValues(alpha: 0.1),
               borderRadius: BorderRadius.circular(10),
             ),
             child: Icon(icon, color: color, size: 17),

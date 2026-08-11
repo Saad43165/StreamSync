@@ -13,7 +13,7 @@ dependencies:
   provider: ^6.1.5+1
   shared_preferences: ^2.5.5
   url_launcher: ^6.3.2
-  youtube_player_flutter: 10.0.1
+  youtube_player_flutter: ^10.0.1
   flutter_inappwebview: ^6.1.0
   google_fonts: ^6.2.1
   flutter_animate: ^4.5.0
@@ -22,7 +22,6 @@ dependencies:
   hive_flutter: ^1.1.0
   screen_brightness: ^1.0.1
   flutter_volume_controller: ^2.0.1
-  dio: ^5.4.0
   path_provider: ^2.1.2
   media_kit: ^1.2.6
   media_kit_video: ^2.0.1

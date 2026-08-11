@@ -56,6 +56,10 @@ class TMDBService extends ChangeNotifier {
 
   bool get hasApiKey => AppConfig.tmdbApiKey.isNotEmpty;
 
+  // Request deduplication: prevents duplicate simultaneous network calls
+  // for the same URL (e.g. when the user scrolls rapidly or widget rebuilds).
+  final Map<String, Future<http.Response>> _inFlight = {};
+
   final List<dynamic> _upcomingMoviesFeed = [];
   List<dynamic> get upcomingMoviesFeed => _upcomingMoviesFeed;
   int _upcomingMoviesPage = 0;
@@ -127,6 +131,19 @@ class TMDBService extends ChangeNotifier {
   void _setLoading(bool value) {
     _isLoading = value;
     notifyListeners();
+  }
+
+  /// Deduplicated HTTP GET: if a request to [url] is already in flight,
+  /// the same Future is returned instead of starting a duplicate request.
+  Future<http.Response> _dedupGet(String url,
+      {Duration timeout = const Duration(seconds: 15)}) {
+    if (_inFlight.containsKey(url)) return _inFlight[url]!;
+    final future = http
+        .get(Uri.parse(url))
+        .timeout(timeout)
+        .whenComplete(() => _inFlight.remove(url));
+    _inFlight[url] = future;
+    return future;
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -402,9 +419,17 @@ class TMDBService extends ChangeNotifier {
       return;
     }
 
-    // Load cache immediately so UI isn't blank while network request runs
+    // Load cache immediately so UI isn't blank while network request runs.
+    // Cache is considered fresh for 6 hours; stale cache is still shown
+    // as a fallback while the network refresh runs in the background.
+    bool _cacheIsStale = true;
     try {
       final cacheBox = Hive.box('tmdb_cache_box');
+      final cachedTs = cacheBox.get('categories_cache_ts') as int?;
+      if (cachedTs != null) {
+        final age = DateTime.now().millisecondsSinceEpoch - cachedTs;
+        _cacheIsStale = age > const Duration(hours: 6).inMilliseconds;
+      }
       final cachedStr = cacheBox.get('categories_cache') as String?;
       if (cachedStr != null) {
         final decoded = json.decode(cachedStr) as Map<String, dynamic>;
@@ -425,6 +450,12 @@ class TMDBService extends ChangeNotifier {
       }
     } catch (e) {
       debugPrint('Error reading Hive categories cache: $e');
+    }
+
+    // If cache is still fresh, skip network request
+    if (!_cacheIsStale) {
+      debugPrint('TMDBService: cache is fresh — skipping network fetch');
+      return;
     }
 
     _setLoading(true);
@@ -723,6 +754,7 @@ class TMDBService extends ChangeNotifier {
         'pakistani': _pakistani,
       };
       await cacheBox.put('categories_cache', json.encode(payload));
+      await cacheBox.put('categories_cache_ts', DateTime.now().millisecondsSinceEpoch);
       notifyListeners();
     } catch (e) {
       debugPrint('Error fetching/saving parallel categories queries: $e');
@@ -891,6 +923,41 @@ class TMDBService extends ChangeNotifier {
       }
     } catch (e) {
       debugPrint('Error fetching TMDB recommendations: $e');
+    }
+    return [];
+  }
+
+  /// FIX 15: Centralised filtered-results fetch used by FilteredResultsScreen.
+  /// Queries TMDB discover endpoint with optional [genreId] and [year] filters.
+  Future<List<dynamic>> fetchFiltered({
+    required String mediaType,
+    String? genreId,
+    String? year,
+    int page = 1,
+  }) async {
+    if (!hasApiKey) return _getMockTrending();
+    try {
+      var url = '$_baseUrl/discover/$mediaType?api_key=${AppConfig.tmdbApiKey}'
+          '&sort_by=popularity.desc&page=$page';
+      if (genreId != null && genreId.isNotEmpty) url += '&with_genres=$genreId';
+      if (year != null && year.isNotEmpty) {
+        if (mediaType == 'movie') {
+          url += '&primary_release_year=$year';
+        } else {
+          url += '&first_air_date_year=$year';
+        }
+      }
+      final res = await _dedupGet(url);
+      if (res.statusCode == 200) {
+        final data = json.decode(res.body);
+        final results = (data['results'] as List<dynamic>? ?? []);
+        for (final item in results) {
+          item['media_type'] = mediaType;
+        }
+        return results;
+      }
+    } catch (e) {
+      debugPrint('Error fetching filtered results: $e');
     }
     return [];
   }
