@@ -12,6 +12,7 @@ import '../theme/app_theme.dart';
 import '../widgets/glass_card.dart';
 import '../widgets/shimmer_loading.dart';
 import 'native_stream_player_screen.dart';
+import '../widgets/download_pre_resolver.dart';
 
 class DetailsScreen extends StatefulWidget {
   final int id;
@@ -259,27 +260,76 @@ class _DetailsScreenState extends State<DetailsScreen> with TickerProviderStateM
                   ),
                   const SizedBox(height: 24),
                   ElevatedButton.icon(
-                    onPressed: () {
+                    onPressed: () async {
                       Navigator.pop(sheetCtx);
-                      downloadService.startDownload(
-                        details: details,
-                        selectedQuality: selectedQuality,
-                        selectedLanguage: selectedLanguage,
-                      );
-                      scaffoldMessenger.showSnackBar(
-                        const SnackBar(
+
+                      final id = details['id'] as int;
+                      final dbSvc = Provider.of<DatabaseService>(
+                          context, listen: false);
+
+                      // If we already have an intercepted real video URL
+                      // (captured during a prior playback session), skip
+                      // the pre-resolve step and download immediately.
+                      final cached = dbSvc.getInterceptedUrl(id);
+                      if (cached != null && cached.isNotEmpty) {
+                        downloadService.startDownload(
+                          details: details,
+                          selectedQuality: selectedQuality,
+                          selectedLanguage: selectedLanguage,
+                        );
+                        scaffoldMessenger.showSnackBar(const SnackBar(
                           backgroundColor: Colors.greenAccent,
                           content: Text(
                             'Download started — check the progress indicator.',
                             style: TextStyle(color: Colors.black),
                           ),
                           behavior: SnackBarBehavior.floating,
-                        ),
+                        ));
+                        return;
+                      }
+
+                      // No cached URL — run the background pre-resolver.
+                      // Shows a bottom sheet with a hidden WebView that
+                      // intercepts the real video URL, then starts download.
+                      if (!context.mounted) return;
+                      final resolvedUrl = await showDownloadPreResolver(
+                        context: context,
+                        tmdbId: id,
+                        title: details['title'] ?? details['name'] ?? '',
+                        mediaType: details['media_type'] as String? ?? 'movie',
                       );
+
+                      if (resolvedUrl != null) {
+                        // Cache the intercepted URL so future downloads
+                        // skip pre-resolve entirely.
+                        dbSvc.cacheInterceptedUrl(id, resolvedUrl);
+                        downloadService.startDownload(
+                          details: details,
+                          selectedQuality: selectedQuality,
+                          selectedLanguage: selectedLanguage,
+                        );
+                        scaffoldMessenger.showSnackBar(const SnackBar(
+                          backgroundColor: Colors.greenAccent,
+                          content: Text(
+                            'Download started — check the progress indicator.',
+                            style: TextStyle(color: Colors.black),
+                          ),
+                          behavior: SnackBarBehavior.floating,
+                        ));
+                      } else {
+                        scaffoldMessenger.showSnackBar(const SnackBar(
+                          backgroundColor: Colors.redAccent,
+                          content: Text(
+                            'Download unavailable for this title right now.',
+                            style: TextStyle(color: Colors.white),
+                          ),
+                          behavior: SnackBarBehavior.floating,
+                        ));
+                      }
                     },
                     icon: const Icon(Icons.download_rounded, color: Colors.black),
                     label: const Text(
-                      'Start download',
+                      'Download',
                       style: TextStyle(
                           color: Colors.black, fontWeight: FontWeight.bold),
                     ),
