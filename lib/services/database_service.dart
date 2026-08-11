@@ -44,6 +44,17 @@ class DatabaseService extends ChangeNotifier {
   final Map<int, String> _resolvedUrls = {};
   Map<int, String> get resolvedUrls => Map.unmodifiable(_resolvedUrls);
 
+  // In-memory cache of real video URLs intercepted from WebView JS
+  final Map<int, String> _interceptedUrls = {};
+
+  /// Cache the real video URL captured by JS for a given tmdbId
+  void cacheInterceptedUrl(int tmdbId, String url) {
+    _interceptedUrls[tmdbId] = url;
+  }
+
+  /// Retrieve the cached real video URL for a given tmdbId (null if not yet captured)
+  String? getInterceptedUrl(int tmdbId) => _interceptedUrls[tmdbId];
+
   // Multi-Profile & Auth system
   String _currentProfile = 'Enthusiast';
   String get currentProfile => _currentProfile;
@@ -412,24 +423,6 @@ class DatabaseService extends ChangeNotifier {
     } catch (e) {
       debugPrint('Error updating country: $e');
     }
-  }
-
-  Future<void> clearHistory() async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      final scope = _activeScope;
-      _watchHistory.clear();
-      _totalHoursWatched = 0;
-      await prefs.remove("streamsync_${scope}_history");
-      await prefs.remove("streamsync_${scope}_watch_stats");
-      notifyListeners();
-    } catch (e) {
-      debugPrint('Error clearing history: $e');
-    }
-  }
-
-  Future<void> clearContinueWatching() async {
-    await clearHistory();
   }
 
   Future<void> clearDatabase() async {

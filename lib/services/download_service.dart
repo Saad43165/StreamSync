@@ -170,12 +170,17 @@ class DownloadService extends ChangeNotifier {
         result = null;
       }
 
-      if (result == null || result.url.isEmpty) {
+      // Prefer an intercepted real video URL (captured from WebView JS) over the embed URL
+      final cachedUrl = dbService.getInterceptedUrl(id);
+      final isResultUsable = result != null && result.isNative;
+      final hasCachedUrl = cachedUrl != null && cachedUrl.isNotEmpty;
+
+      if (!isResultUsable && !hasCachedUrl) {
         _showOneShot(id, '❌ No downloadable source found.');
         return;
       }
 
-      final sourceUrl = result.url;
+      final sourceUrl = hasCachedUrl ? cachedUrl : result!.url;
 
       // ── Step 2: Build save directory ──────────────────────────────────
       final saveDir = await _resolveDownloadDir();
@@ -356,11 +361,11 @@ class DownloadService extends ChangeNotifier {
       try {
         final ext = await getExternalStorageDirectory();
         if (ext != null) {
-          dir = Directory('${ext.path}/StreamVault');
+          dir = Directory('${ext.path}/StreamSync');
         }
       } catch (_) {}
     }
-    dir ??= Directory('${(await getApplicationDocumentsDirectory()).path}/StreamVault');
+    dir ??= Directory('${(await getApplicationDocumentsDirectory()).path}/StreamSync');
     if (!await dir.exists()) await dir.create(recursive: true);
     return dir;
   }

@@ -50,7 +50,23 @@ class _MiniPlayerWidgetState extends State<MiniPlayerWidget>
     }
   }
 
+  /// Returns true only for direct video file URLs that media_kit can play.
+  /// Embed page URLs (vidlink.pro, vidsrc.pm, etc.) return false.
+  bool _isDirectVideoUrl(String url) {
+    final u = url.toLowerCase();
+    return u.contains('.m3u8') || u.contains('.mp4') || u.contains('.webm') ||
+           u.contains('.mkv') || u.contains('.ts') || u.contains('.mpd') ||
+           u.contains('googlevideo') || u.contains('akamaized') ||
+           u.contains('hwcdn.net') || u.contains('fastly.net');
+  }
+
   Future<void> _initializePlayer(String url) async {
+    // Only attempt native playback for direct video URLs; skip embed pages
+    if (!_isDirectVideoUrl(url)) {
+      debugPrint('Mini player: skipping non-direct URL, will show poster only');
+      return;
+    }
+
     // Prevent multiple simultaneous initializations
     if (_isInitializing) return;
     if (_isInitialized && _lastStreamUrl == url) return;
@@ -228,6 +244,19 @@ class _MiniPlayerWidgetState extends State<MiniPlayerWidget>
                           children: [
                             if (_isInitialized && _videoController != null)
                               Video(controller: _videoController!)
+                            else if (miniPlayerService.posterPath != null &&
+                                     miniPlayerService.posterPath!.isNotEmpty)
+                              Image.network(
+                                'https://image.tmdb.org/t/p/w92${miniPlayerService.posterPath}',
+                                fit: BoxFit.cover,
+                                errorBuilder: (_, __, ___) => Center(
+                                  child: Icon(
+                                    Icons.movie_outlined,
+                                    color: Colors.white.withValues(alpha: 0.4),
+                                    size: 24,
+                                  ),
+                                ),
+                              )
                             else
                               Center(
                                 child: _isInitializing
@@ -240,7 +269,7 @@ class _MiniPlayerWidgetState extends State<MiniPlayerWidget>
                                   ),
                                 )
                                     : Icon(
-                                  Icons.play_circle_outline,
+                                  Icons.movie_outlined,
                                   color: Colors.white.withValues(alpha: 0.4),
                                   size: 24,
                                 ),

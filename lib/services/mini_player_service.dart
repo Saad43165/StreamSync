@@ -233,6 +233,15 @@ class MiniPlayerService extends ChangeNotifier {
     notifyListeners();
   }
 
+  // ── Intercepted video URL ──────────────────────────────────────────────────
+  String? _interceptedVideoUrl;
+  String? get interceptedVideoUrl => _interceptedVideoUrl;
+
+  /// Cache the real (intercepted) video URL captured from JS; does not notify
+  void updateVideoUrl(String url) {
+    _interceptedVideoUrl = url;
+  }
+
   /// Update metadata
   void updateMetadata({
     String? title,

@@ -97,6 +97,14 @@ class _NativeStreamPlayerScreenState extends State<NativeStreamPlayerScreen>
   bool _autoSwitchTriggered = false;
   bool _videoPlayingDetected = false;
   final Map<int, bool?> _mirrorHealth = {};
+
+  // JS interceptor state
+  String? _interceptedVideoUrl;
+  bool _isSwitchingToNative = false;
+
+  // WebView progress tracking (fallback when not in native mode)
+  int _lastKnownPositionSeconds = 0;
+  int _lastKnownDurationSeconds = 0;
   Key  _webViewKey = UniqueKey();
 
   List<Map<String, String>> _mirrors = [];
@@ -369,6 +377,11 @@ class _NativeStreamPlayerScreenState extends State<NativeStreamPlayerScreen>
     _loadingTimeout?.cancel();
     _videoDetectionTimer?.cancel();
 
+    // Mute any lingering audio/video before loading new mirror
+    _webController?.evaluateJavascript(
+      source: 'try{document.querySelectorAll("video,audio").forEach(function(m){m.pause();m.src="";});}catch(e){}',
+    );
+
     setState(() {
       _webMirrorIndex      = index;
       _webLoading          = true;
@@ -538,18 +551,9 @@ class _NativeStreamPlayerScreenState extends State<NativeStreamPlayerScreen>
       _mirrorHealth[_webMirrorIndex] = true;
     });
 
-    // FIXED: Change ScaffoldMessenger.of(context).mounted → mounted
+    // Clear any stale snackbars; no new one — don't expose provider names to user
     if (mounted) {
       ScaffoldMessenger.of(context).clearSnackBars();
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text(
-          '✓ ${_mirrors.isNotEmpty ? _mirrors[_webMirrorIndex]["name"] : "Mirror"} - Playing',
-          style: const TextStyle(color: Colors.white),
-        ),
-        backgroundColor: Colors.green.withValues(alpha: 0.8),
-        duration: const Duration(seconds: 2),
-        behavior: SnackBarBehavior.floating,
-      ));
     }
   }
 
@@ -559,18 +563,9 @@ class _NativeStreamPlayerScreenState extends State<NativeStreamPlayerScreen>
     final next = (_webMirrorIndex + 1) % _mirrors.length;
     _autoSwitchTriggered = true;
 
-    // FIXED: Use context.mounted, not ScaffoldMessenger.of(context).mounted
+    // Suppress technical mirror-switching info from the user
     if (context.mounted) {
       ScaffoldMessenger.of(context).clearSnackBars();
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text(
-          '${_mirrors[_webMirrorIndex]["name"]} unavailable — trying ${_mirrors[next]["name"]}…',
-          style: const TextStyle(color: Colors.white),
-        ),
-        backgroundColor: Colors.black87,
-        duration: const Duration(seconds: 2),
-        behavior: SnackBarBehavior.floating,
-      ));
     }
     _switchMirror(next);
   }
@@ -709,13 +704,7 @@ class _NativeStreamPlayerScreenState extends State<NativeStreamPlayerScreen>
               title: Text('${speed}x', style: TextStyle(color: _playbackSpeed == speed ? AppTheme.accent : Colors.white70, fontSize: 14)),
               trailing: _playbackSpeed == speed ? Icon(Icons.check, color: AppTheme.accent, size: 20) : null,
               onTap: () {
-                if (_isNativeMode) {
-                  _player.setRate(speed);
-                } else if (_webController != null) {
-                  // FIX 26: Apply playback rate to embedded WebView video
-                  _webController!.evaluateJavascript(source:
-                    'document.querySelectorAll("video").forEach(function(v){v.playbackRate=$speed;});');
-                }
+                _player.setRate(speed);
                 setState(() => _playbackSpeed = speed);
                 Navigator.pop(ctx);
               },
@@ -804,19 +793,65 @@ class _NativeStreamPlayerScreenState extends State<NativeStreamPlayerScreen>
 
   void _saveProgress() {
     if (!mounted) return;
-    // Only native mode has a media_kit player with real position/duration
-    if (!_isNativeMode) return;
-    final db  = Provider.of<DatabaseService>(context, listen: false);
-    final pos = _player.state.position.inSeconds;
-    final dur = _player.state.duration.inSeconds;
+    final db = Provider.of<DatabaseService>(context, listen: false);
+
+    int pos = 0;
+    int dur = 0;
+
+    if (_isNativeMode) {
+      pos = _player.state.position.inSeconds;
+      dur = _player.state.duration.inSeconds;
+      if (dur > 0) {
+        _miniPlayerService.updatePosition(
+          _player.state.position,
+          _player.state.duration,
+        );
+      }
+    } else {
+      // WebView mode: use last position reported by JS
+      pos = _lastKnownPositionSeconds;
+      dur = _lastKnownDurationSeconds;
+    }
+
     if (dur > 0) {
       db.updateHistoryProgress(widget.id, pos, dur);
-      _miniPlayerService.updatePosition(
-        _player.state.position,
-        _player.state.duration,
-      );
     }
   }
+  /// Switches from WebView to native media_kit playback using an intercepted video URL
+  Future<void> _switchToNativePlayer(String url) async {
+    if (_isSwitchingToNative || _isNativeMode) return;
+    _isSwitchingToNative = true;
+    try {
+      // Pause the WebView to stop audio bleed
+      await _webController?.evaluateJavascript(
+        source: 'try { document.querySelector("video")?.pause(); } catch(e){}',
+      );
+
+      // Init media_kit with the intercepted URL
+      await _player.open(Media(url));
+      await _player.play();
+
+      // Cache intercepted URL so downloads can use it
+      if (mounted) {
+        Provider.of<DatabaseService>(context, listen: false)
+            .cacheInterceptedUrl(widget.id, url);
+      }
+
+      if (!mounted) return;
+      setState(() {
+        _isNativeMode = true;
+        _isSwitchingToNative = false;
+        _streamUrl = url; // update so _startMiniPlayer uses the real video URL
+      });
+
+      // Hand the URL to the mini player service
+      _miniPlayerService.updateVideoUrl(url);
+    } catch (e) {
+      debugPrint('Native switch failed: $e');
+      _isSwitchingToNative = false;
+    }
+  }
+
   /// Activates mini player with current playback state
   void _startMiniPlayer() {
     if (_streamUrl == null || _isResolving || _isUnavailable) {
@@ -852,13 +887,11 @@ class _NativeStreamPlayerScreenState extends State<NativeStreamPlayerScreen>
   // ── Build ──────────────────────────────────────────────────────────────────
   @override
   Widget build(BuildContext context) {
-    return PopScope(
-      canPop: true,
-      onPopInvokedWithResult: (didPop, _) {
-        if (didPop) {
-          SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
-          SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
-        }
+    return WillPopScope(
+      onWillPop: () async {
+        SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
+        SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+        return true;
       },
       child: Scaffold(
         backgroundColor: Colors.black,
@@ -972,6 +1005,29 @@ class _NativeStreamPlayerScreenState extends State<NativeStreamPlayerScreen>
                 if (mounted && !_isControlsVisible) _toggleControls();
               },
             );
+
+            // JS video URL interceptor — switches to native player when a real video URL is found
+            ctrl.addJavaScriptHandler(
+              handlerName: 'onVideoUrl',
+              callback: (args) async {
+                final url = args.isNotEmpty ? args[0] as String? : null;
+                if (url != null && url.isNotEmpty && !_isSwitchingToNative && !_isNativeMode) {
+                  _interceptedVideoUrl = url;
+                  await _switchToNativePlayer(url);
+                }
+              },
+            );
+
+            // JS position reporter — updates progress for WebView mode
+            ctrl.addJavaScriptHandler(
+              handlerName: 'onVideoProgress',
+              callback: (args) {
+                if (args.length >= 2) {
+                  _lastKnownPositionSeconds = (args[0] as num?)?.toInt() ?? 0;
+                  _lastKnownDurationSeconds = (args[1] as num?)?.toInt() ?? 0;
+                }
+              },
+            );
           },
           onCreateWindow: (_, __) async => false,
           onLoadStart: (_, __) {
@@ -989,6 +1045,129 @@ class _NativeStreamPlayerScreenState extends State<NativeStreamPlayerScreen>
             await ctrl.evaluateJavascript(source: _adKillerScript);
             await ctrl.evaluateJavascript(
                 source: _videoPlaybackWatcherScript);
+
+            // Inject video URL interceptor — reports first real video URL back to Dart
+            await ctrl.evaluateJavascript(source: r"""
+(function() {
+  'use strict';
+  if (window.__svInterceptorActive) return;
+  window.__svInterceptorActive = true;
+
+  let reported = false;
+
+  function isDirectVideo(url) {
+    if (!url || typeof url !== 'string') return false;
+    if (url.startsWith('blob:') || url.startsWith('data:') || url.startsWith('javascript:')) return false;
+    const u = url.toLowerCase().split('?')[0];
+    return u.endsWith('.m3u8') || u.endsWith('.mp4') || u.endsWith('.mkv') ||
+           u.endsWith('.webm') || u.endsWith('.ts') || u.endsWith('.mpd') ||
+           url.includes('.m3u8') || url.includes('manifest') ||
+           url.includes('googlevideo.com') || url.includes('akamaized.net') ||
+           url.includes('hwcdn.net') || url.includes('fastly.net');
+  }
+
+  function report(url) {
+    if (reported) return;
+    if (!url || url.startsWith('blob:')) return;
+    reported = true;
+    try {
+      window.flutter_inappwebview.callHandler('onVideoUrl', url);
+    } catch(e) {}
+  }
+
+  // Hook HTMLMediaElement.src setter
+  try {
+    const desc = Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, 'src');
+    if (desc && desc.set) {
+      Object.defineProperty(HTMLMediaElement.prototype, 'src', {
+        set(val) {
+          if (isDirectVideo(val)) report(val);
+          desc.set.call(this, val);
+        },
+        get() { return desc.get.call(this); },
+        configurable: true
+      });
+    }
+  } catch(e) {}
+
+  // Listen for video loadedmetadata
+  document.addEventListener('loadedmetadata', function(e) {
+    if (e.target && e.target.tagName === 'VIDEO') {
+      const src = e.target.currentSrc || e.target.src;
+      if (src && isDirectVideo(src)) report(src);
+      if (src && src.startsWith('blob:')) {
+        const sources = e.target.querySelectorAll('source');
+        sources.forEach(function(s) { if (isDirectVideo(s.src)) report(s.src); });
+      }
+    }
+  }, true);
+
+  // XHR interceptor — catches m3u8 playlist requests
+  const origOpen = XMLHttpRequest.prototype.open;
+  XMLHttpRequest.prototype.open = function(method, url) {
+    if (typeof url === 'string' && isDirectVideo(url)) report(url);
+    return origOpen.apply(this, arguments);
+  };
+
+  // Fetch interceptor
+  const origFetch = window.fetch;
+  if (origFetch) {
+    window.fetch = function(input, init) {
+      const url = typeof input === 'string' ? input : (input && input.url);
+      if (url && isDirectVideo(url)) report(url);
+      return origFetch.apply(this, arguments);
+    };
+  }
+
+  // MutationObserver — checks newly added video elements
+  function checkVideos() {
+    document.querySelectorAll('video').forEach(function(v) {
+      const src = v.currentSrc || v.src;
+      if (src && isDirectVideo(src)) report(src);
+    });
+  }
+
+  const obs = new MutationObserver(checkVideos);
+  function startObs() {
+    obs.observe(document.body, {subtree: true, childList: true, attributes: true, attributeFilter: ['src']});
+    checkVideos();
+  }
+  if (document.body) startObs();
+  else document.addEventListener('DOMContentLoaded', startObs);
+
+  // Fallback polling (some players set src late)
+  let polls = 0;
+  const timer = setInterval(function() {
+    checkVideos();
+    if (reported || ++polls > 40) clearInterval(timer);
+  }, 1500);
+})();
+""");
+
+            // Inject position reporter — keeps WebView progress in sync
+            await ctrl.evaluateJavascript(source: r"""
+(function() {
+  if (window.__svPositionReporter) return;
+  window.__svPositionReporter = true;
+  setInterval(function() {
+    var v = document.querySelector('video');
+    if (v && !isNaN(v.duration) && v.duration > 0) {
+      try {
+        window.flutter_inappwebview.callHandler('onVideoProgress',
+          Math.floor(v.currentTime), Math.floor(v.duration));
+      } catch(e) {}
+    }
+  }, 5000);
+})();
+""");
+
+            // Apply current playback speed to WebView video if non-default
+            if (_playbackSpeed != 1.0) {
+              await ctrl.evaluateJavascript(
+                source: 'try{var v=document.querySelector("video");if(v)v.playbackRate=$_playbackSpeed;}catch(e){}',
+              );
+            }
+
             await Future.delayed(const Duration(milliseconds: 800));
 
             if (mounted) {
@@ -1119,7 +1298,7 @@ class _NativeStreamPlayerScreenState extends State<NativeStreamPlayerScreen>
           ),
           const SizedBox(height: 8),
           const Text(
-            'Finding the best available source…',
+            'Loading your stream…',
             style: TextStyle(color: Colors.white30, fontSize: 11),
           ),
         ]),
@@ -1147,14 +1326,14 @@ class _NativeStreamPlayerScreenState extends State<NativeStreamPlayerScreen>
                   color: Colors.redAccent, size: 36),
             ),
             const SizedBox(height: 20),
-            const Text('Not Available',
+            const Text('Stream Unavailable',
                 style: TextStyle(
                     color: Colors.white,
                     fontSize: 22,
                     fontWeight: FontWeight.bold)),
             const SizedBox(height: 10),
             const Text(
-              'This title couldn\'t be found on any source.\nTry a mirror directly:',
+              'This title isn\'t available right now.\nTry a different option below:',
               textAlign: TextAlign.center,
               style: TextStyle(
                   color: Colors.white54, fontSize: 13, height: 1.5),
@@ -1240,16 +1419,13 @@ class _NativeStreamPlayerScreenState extends State<NativeStreamPlayerScreen>
                 color: AppTheme.accent, strokeWidth: 2.5),
           ),
           const SizedBox(height: 18),
-          Text(
-            'Loading ${_mirrors.isNotEmpty ? _mirrors[_webMirrorIndex]["name"] : ""}…',
-            style: const TextStyle(
+          const Text(
+            'Loading your stream…',
+            style: TextStyle(
                 color: Colors.white70,
                 fontSize: 13,
                 fontWeight: FontWeight.w500),
           ),
-          const SizedBox(height: 6),
-          Text('Mirror ${_webMirrorIndex + 1} of ${_mirrors.length}',
-              style: const TextStyle(color: Colors.white30, fontSize: 11)),
           const SizedBox(height: 24),
           if (_mirrors.isNotEmpty)
             SizedBox(
@@ -1447,11 +1623,6 @@ class _NativeStreamPlayerScreenState extends State<NativeStreamPlayerScreen>
                                 fontSize: 14,
                                 fontWeight: FontWeight.w600),
                             overflow: TextOverflow.ellipsis),
-                        if (_streamSource != null)
-                          Text('Native stream',
-                              style: TextStyle(
-                                  color: AppTheme.accent.withValues(alpha: 0.8),
-                                  fontSize: 10)),
                       ],
                     ),
                   ),
