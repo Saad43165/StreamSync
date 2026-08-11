@@ -251,6 +251,7 @@ class _HomeScreenState extends State<HomeScreen>
         selector: (_, tmdb) => _TMDBSnapshot(
           isLoading: tmdb.isLoading,
           hasApiKey: tmdb.hasApiKey,
+          hasError: tmdb.lastFetchError != null,
           trending: tmdb.trending,
           movies: tmdb.movies,
           series: tmdb.series,
@@ -522,12 +523,14 @@ class _HomeScreenState extends State<HomeScreen>
             accentColor: accentColor,
             showFreeBadge: showFreeBadge,
             isLoading: isLoading || snap.isLoading,
+            hasError: snap.hasError && items.isEmpty && !snap.isLoading,
             platformLogoUrl: platformLogoUrl,
             onSeeAll: () => Navigator.push(context, MaterialPageRoute(
                 builder: (_) => SeeAllScreen(
                     categoryTitle: title, initialItems: items))),
             onItemTap: (item, url) => _pushDetails(context, item,
                 posterUrl: url),
+            onRetry: () => context.read<TMDBService>().fetchTrending(),
           ),
         ),
       );
@@ -703,6 +706,7 @@ class _TMDBSnapshot {
   const _TMDBSnapshot({
     required this.isLoading,
     required this.hasApiKey,
+    required this.hasError,
     required this.trending,
     required this.movies,
     required this.series,
@@ -720,6 +724,7 @@ class _TMDBSnapshot {
 
   final bool isLoading;
   final bool hasApiKey;
+  final bool hasError;
   final List<dynamic> trending, movies, series, bollywood, pakistani,
       upcoming, netflix, prime, disney, actionMovies, comedyMovies,
       scifiMovies, horrorMovies;
@@ -730,6 +735,7 @@ class _TMDBSnapshot {
     return other is _TMDBSnapshot &&
         other.isLoading == isLoading &&
         other.hasApiKey == hasApiKey &&
+        other.hasError == hasError &&
         listEquals(other.trending, trending) &&
         listEquals(other.movies, movies) &&
         listEquals(other.series, series) &&
@@ -746,7 +752,7 @@ class _TMDBSnapshot {
   }
 
   @override
-  int get hashCode => Object.hash(isLoading, hasApiKey,
+  int get hashCode => Object.hash(isLoading, hasApiKey, hasError,
       trending, movies, series, netflix, prime, disney,
       actionMovies, comedyMovies, scifiMovies, horrorMovies,
       bollywood, pakistani, upcoming);
@@ -1151,7 +1157,18 @@ class _ContinueWatchingSection extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final db      = context.watch<DatabaseService>();
-    final history = db.watchHistory;
+    // Feature 8: Filter out completed (≥95%) and sort by most recently watched
+    final history = db.watchHistory.where((item) {
+      final progress = item['progress_seconds'] as int? ?? 0;
+      final duration = item['duration_seconds'] as int? ?? 0;
+      final pct = duration > 0 ? (progress / duration) : 0.0;
+      return pct < 0.95;
+    }).toList()
+      ..sort((a, b) {
+        final ta = (a['lastWatchedAt'] ?? a['last_watched'] ?? '') as String;
+        final tb = (b['lastWatchedAt'] ?? b['last_watched'] ?? '') as String;
+        return tb.compareTo(ta);
+      });
     if (history.isEmpty) return const SizedBox.shrink();
 
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -1192,6 +1209,12 @@ class _ContinueWatchingSection extends StatelessWidget {
             final epLabel  = item['media_type'] == 'tv'
                 ? 'S${item['season'] ?? 1} E${item['episode'] ?? 1}'
                 : 'Movie';
+            // Feature 8: Resume timestamp label
+            final resumeMins = progress ~/ 60;
+            final resumeSecs = progress % 60;
+            final resumeLabel = progress > 0
+                ? 'Resume at $resumeMins:${resumeSecs.toString().padLeft(2, '0')}'
+                : null;
 
             return Dismissible(
               key: Key('cw_${item['id']}_${item['season']}_${item['episode']}'),
@@ -1252,6 +1275,13 @@ class _ContinueWatchingSection extends StatelessWidget {
                                     color: Colors.white,
                                     fontWeight: FontWeight.bold,
                                     fontSize: 12)),
+                            if (resumeLabel != null) ...[
+                              const SizedBox(height: 2),
+                              Text(resumeLabel,
+                                  style: const TextStyle(
+                                      color: Color(0xFFAAAAAA),
+                                      fontSize: 9)),
+                            ],
                             const SizedBox(height: 3),
                             Row(
                                 mainAxisAlignment:
@@ -1313,19 +1343,25 @@ class _ContentRow extends StatelessWidget {
     this.accentColor,
     this.platformLogoUrl,
     this.showFreeBadge = false,
+    this.hasError = false,
+    this.onRetry,
   });
 
   final String title;
   final List<dynamic> items;
   final GlobalKey sectionKey;
-  final bool isLoading, showFreeBadge;
+  final bool isLoading, showFreeBadge, hasError;
   final Color? accentColor;
   final String? platformLogoUrl;
   final VoidCallback onSeeAll;
   final void Function(dynamic item, String posterUrl) onItemTap;
+  final VoidCallback? onRetry;
 
   @override
   Widget build(BuildContext context) {
+    // If empty after load and no error, hide the section
+    if (!isLoading && items.isEmpty && !hasError) return const SizedBox.shrink();
+
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       const SizedBox(height: 32),
       _SectionHeader(
@@ -1350,10 +1386,42 @@ class _ContentRow extends StatelessWidget {
             : null,
       ),
       const SizedBox(height: 14),
-      isLoading
-          ? ShimmerLoadingPresets.horizontalPostersSkeleton()
-          : _PosterRow(items: items, showFreeBadge: showFreeBadge,
-          onItemTap: onItemTap),
+      if (isLoading)
+        ShimmerLoadingPresets.horizontalPostersSkeleton()
+      else if (hasError && items.isEmpty)
+        // Error state with retry button (Feature 7)
+        Container(
+          margin: const EdgeInsets.symmetric(horizontal: 16),
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          decoration: BoxDecoration(
+            color: const Color(0x1AFF5252),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: const Color(0x33FF5252)),
+          ),
+          child: Row(children: [
+            const Icon(Icons.wifi_off_rounded, color: Colors.redAccent, size: 16),
+            const SizedBox(width: 10),
+            const Expanded(
+              child: Text("Couldn't load this section.",
+                  style: TextStyle(color: Color(0xB3FFFFFF), fontSize: 12)),
+            ),
+            if (onRetry != null)
+              GestureDetector(
+                onTap: onRetry,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                  decoration: BoxDecoration(
+                    color: const Color(0x26FFFFFF),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: const Text('Retry',
+                      style: TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold)),
+                ),
+              ),
+          ]),
+        )
+      else
+        _PosterRow(items: items, showFreeBadge: showFreeBadge, onItemTap: onItemTap),
     ]);
   }
 }

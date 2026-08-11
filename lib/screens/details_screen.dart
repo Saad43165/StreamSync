@@ -12,7 +12,7 @@ import '../theme/app_theme.dart';
 import '../widgets/glass_card.dart';
 import '../widgets/shimmer_loading.dart';
 import 'native_stream_player_screen.dart';
-import '../widgets/download_pre_resolver.dart';
+import 'person_screen.dart';
 
 class DetailsScreen extends StatefulWidget {
   final int id;
@@ -36,6 +36,8 @@ class _DetailsScreenState extends State<DetailsScreen> with TickerProviderStateM
   Map<String, dynamic>? _details;
   bool _isLoading = true;
   String? _error;
+  List<dynamic> _recommendations = [];
+  bool _recsLoading = true;
 
   // TV Selector variables
   int _selectedSeason = 1;
@@ -86,6 +88,11 @@ class _DetailsScreenState extends State<DetailsScreen> with TickerProviderStateM
       if (!mounted) return;
 
       if (details != null) {
+        // Fetch recommendations in parallel
+        tmdbService.fetchRecommendations(widget.id, widget.mediaType).then((recs) {
+          if (mounted) setState(() { _recommendations = recs; _recsLoading = false; });
+        });
+
         setState(() {
           _details = details;
           _isLoading = false;
@@ -107,6 +114,7 @@ class _DetailsScreenState extends State<DetailsScreen> with TickerProviderStateM
       } else {
         setState(() {
           _isLoading = false;
+          _recsLoading = false;
           _error = 'Could not load details';
         });
       }
@@ -115,6 +123,7 @@ class _DetailsScreenState extends State<DetailsScreen> with TickerProviderStateM
       if (mounted) {
         setState(() {
           _isLoading = false;
+          _recsLoading = false;
           _error = 'Failed to load: ${e.toString()}';
         });
       }
@@ -260,76 +269,27 @@ class _DetailsScreenState extends State<DetailsScreen> with TickerProviderStateM
                   ),
                   const SizedBox(height: 24),
                   ElevatedButton.icon(
-                    onPressed: () async {
+                    onPressed: () {
                       Navigator.pop(sheetCtx);
-
-                      final id = details['id'] as int;
-                      final dbSvc = Provider.of<DatabaseService>(
-                          context, listen: false);
-
-                      // If we already have an intercepted real video URL
-                      // (captured during a prior playback session), skip
-                      // the pre-resolve step and download immediately.
-                      final cached = dbSvc.getInterceptedUrl(id);
-                      if (cached != null && cached.isNotEmpty) {
-                        downloadService.startDownload(
-                          details: details,
-                          selectedQuality: selectedQuality,
-                          selectedLanguage: selectedLanguage,
-                        );
-                        scaffoldMessenger.showSnackBar(const SnackBar(
-                          backgroundColor: Colors.greenAccent,
-                          content: Text(
-                            'Download started — check the progress indicator.',
-                            style: TextStyle(color: Colors.black),
-                          ),
-                          behavior: SnackBarBehavior.floating,
-                        ));
-                        return;
-                      }
-
-                      // No cached URL — run the background pre-resolver.
-                      // Shows a bottom sheet with a hidden WebView that
-                      // intercepts the real video URL, then starts download.
-                      if (!context.mounted) return;
-                      final resolvedUrl = await showDownloadPreResolver(
-                        context: context,
-                        tmdbId: id,
-                        title: details['title'] ?? details['name'] ?? '',
-                        mediaType: details['media_type'] as String? ?? 'movie',
+                      downloadService.startDownload(
+                        details: details,
+                        selectedQuality: selectedQuality,
+                        selectedLanguage: selectedLanguage,
                       );
-
-                      if (resolvedUrl != null) {
-                        // Cache the intercepted URL so future downloads
-                        // skip pre-resolve entirely.
-                        dbSvc.cacheInterceptedUrl(id, resolvedUrl);
-                        downloadService.startDownload(
-                          details: details,
-                          selectedQuality: selectedQuality,
-                          selectedLanguage: selectedLanguage,
-                        );
-                        scaffoldMessenger.showSnackBar(const SnackBar(
+                      scaffoldMessenger.showSnackBar(
+                        const SnackBar(
                           backgroundColor: Colors.greenAccent,
                           content: Text(
                             'Download started — check the progress indicator.',
                             style: TextStyle(color: Colors.black),
                           ),
                           behavior: SnackBarBehavior.floating,
-                        ));
-                      } else {
-                        scaffoldMessenger.showSnackBar(const SnackBar(
-                          backgroundColor: Colors.redAccent,
-                          content: Text(
-                            'Download unavailable for this title right now.',
-                            style: TextStyle(color: Colors.white),
-                          ),
-                          behavior: SnackBarBehavior.floating,
-                        ));
-                      }
+                        ),
+                      );
                     },
                     icon: const Icon(Icons.download_rounded, color: Colors.black),
                     label: const Text(
-                      'Download',
+                      'Start download',
                       style: TextStyle(
                           color: Colors.black, fontWeight: FontWeight.bold),
                     ),
@@ -532,7 +492,17 @@ class _DetailsScreenState extends State<DetailsScreen> with TickerProviderStateM
                     ),
                   ),
 
-                  SliverToBoxAdapter(child: const SizedBox(height: 22)),
+                  SliverToBoxAdapter(child: const SizedBox(height: 16)),
+
+                  // Star rating row (Feature 6)
+                  SliverToBoxAdapter(
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 20),
+                      child: _StarRatingRow(tmdbId: widget.id),
+                    ),
+                  ),
+
+                  SliverToBoxAdapter(child: const SizedBox(height: 16)),
 
                   // Watch button
                   SliverToBoxAdapter(
@@ -596,6 +566,22 @@ class _DetailsScreenState extends State<DetailsScreen> with TickerProviderStateM
                                 label: 'Cast & crew'),
                             const SizedBox(height: 14),
                             _CastRow(castList: castList),
+                          ],
+
+                          // Recommendations row (Feature 1)
+                          if (_recsLoading || _recommendations.isNotEmpty) ...[
+                            const SizedBox(height: 26),
+                            const _SectionHeader(
+                                icon: Icons.recommend_rounded,
+                                label: 'More Like This'),
+                            const SizedBox(height: 14),
+                            if (_recsLoading)
+                              ShimmerLoadingPresets.horizontalPostersSkeleton()
+                            else
+                              _RecommendationsRow(
+                                items: _recommendations,
+                                mediaType: widget.mediaType,
+                              ),
                           ],
 
                           const SizedBox(height: 40),
@@ -1048,10 +1034,21 @@ class _CastRow extends StatelessWidget {
         itemCount: displayCast.length,
         itemBuilder: (context, index) {
           final cast = displayCast[index] as Map<String, dynamic>;
-          return _CastCard(
-            name: cast['name'] ?? 'Unknown',
-            character: cast['character'] ?? '',
-            profilePath: cast['profile_path'],
+          return GestureDetector(
+            onTap: () {
+              final personId = cast['id'];
+              if (personId is int) {
+                Navigator.push(context, MaterialPageRoute(
+                    builder: (_) => PersonScreen(
+                        personId: personId,
+                        name: cast['name'] as String? ?? '')));
+              }
+            },
+            child: _CastCard(
+              name: cast['name'] ?? 'Unknown',
+              character: cast['character'] ?? '',
+              profilePath: cast['profile_path'],
+            ),
           );
         },
       ),
@@ -1773,6 +1770,128 @@ class _WatchlistButton extends StatelessWidget {
           ),
         );
       },
+    );
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// STAR RATING ROW (Feature 6)
+// ═══════════════════════════════════════════════════════════════════════════
+
+class _StarRatingRow extends StatelessWidget {
+  final int tmdbId;
+  const _StarRatingRow({required this.tmdbId});
+
+  @override
+  Widget build(BuildContext context) {
+    final db = context.watch<DatabaseService>();
+    final current = db.getRating(tmdbId);
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      const Text('Your rating',
+          style: TextStyle(color: Colors.white54, fontSize: 11, fontWeight: FontWeight.w500)),
+      const SizedBox(height: 6),
+      Row(
+        mainAxisSize: MainAxisSize.min,
+        children: List.generate(5, (i) {
+          final filled = current != null && current > i;
+          return GestureDetector(
+            onTap: () {
+              Provider.of<DatabaseService>(context, listen: false).setRating(tmdbId, i + 1);
+            },
+            child: Padding(
+              padding: const EdgeInsets.only(right: 4),
+              child: Icon(
+                filled ? Icons.star_rounded : Icons.star_outline_rounded,
+                color: filled ? AppTheme.accent : Colors.white24,
+                size: 28,
+              ),
+            ),
+          );
+        }),
+      ),
+    ]);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// RECOMMENDATIONS ROW (Feature 1)
+// ═══════════════════════════════════════════════════════════════════════════
+
+class _RecommendationsRow extends StatelessWidget {
+  final List<dynamic> items;
+  final String mediaType;
+  const _RecommendationsRow({required this.items, required this.mediaType});
+
+  static String _posterUrl(String? path) {
+    if (path == null || path.isEmpty) return '';
+    if (path.startsWith('http')) return path;
+    return 'https://image.tmdb.org/t/p/w300$path';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (items.isEmpty) return const SizedBox.shrink();
+    return SizedBox(
+      height: 210,
+      child: ListView.builder(
+        scrollDirection: Axis.horizontal,
+        physics: const BouncingScrollPhysics(),
+        padding: const EdgeInsets.symmetric(horizontal: 4),
+        itemExtent: 132,
+        itemCount: items.length,
+        itemBuilder: (ctx, i) {
+          final item = items[i] as Map<String, dynamic>;
+          final id = item['id'] as int? ?? 0;
+          final title = (item['title'] ?? item['name'] ?? 'Untitled') as String;
+          final mt = (item['media_type'] as String?) ?? mediaType;
+          final poster = _posterUrl(item['poster_path'] as String?);
+          final rating = (item['vote_average'] as num?)?.toDouble() ?? 0.0;
+
+          return Padding(
+            padding: const EdgeInsets.only(right: 12),
+            child: GestureDetector(
+              onTap: () => Navigator.push(ctx, MaterialPageRoute(
+                  builder: (_) => DetailsScreen(id: id, mediaType: mt))),
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Expanded(
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(12),
+                    child: Stack(fit: StackFit.expand, children: [
+                      poster.isNotEmpty
+                          ? CachedNetworkImage(imageUrl: poster, fit: BoxFit.cover,
+                              placeholder: (_, __) => const ImageShimmerPlaceholder(borderRadius: 12),
+                              errorWidget: (_, __, ___) => Container(color: AppTheme.surface,
+                                  child: const Icon(Icons.movie_rounded, color: Colors.white24, size: 28)))
+                          : Container(color: AppTheme.surface,
+                              child: const Icon(Icons.movie_rounded, color: Colors.white24, size: 28)),
+                      if (rating > 0)
+                        Positioned(
+                          bottom: 7, right: 7,
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                            decoration: BoxDecoration(
+                              color: Colors.black.withValues(alpha: 0.7),
+                              borderRadius: BorderRadius.circular(6),
+                            ),
+                            child: Row(mainAxisSize: MainAxisSize.min, children: [
+                              const Icon(Icons.star_rounded, color: Color(0xFFF5C842), size: 10),
+                              const SizedBox(width: 3),
+                              Text(rating.toStringAsFixed(1),
+                                  style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold)),
+                            ]),
+                          ),
+                        ),
+                    ]),
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Text(title, maxLines: 2, overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(color: Colors.white, fontSize: 11.5, fontWeight: FontWeight.w500, height: 1.3)),
+              ]),
+            ),
+          );
+        },
+      ),
     );
   }
 }

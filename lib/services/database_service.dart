@@ -79,6 +79,40 @@ class DatabaseService extends ChangeNotifier {
   final Set<int> _watchlistIds = {};
   final Set<int> _downloadIds = {};
 
+  // ── Local ratings (Feature 6) ─────────────────────────────────────────────
+  final Map<int, int> _ratings = {}; // tmdbId → 1-5 stars
+  int? getRating(int tmdbId) => _ratings[tmdbId];
+
+  Future<void> setRating(int tmdbId, int stars) async {
+    _ratings[tmdbId] = stars;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final key = 'streamsync_${_activeScope}_ratings';
+      final existing = Map<String, dynamic>.from(
+          jsonDecode(prefs.getString(key) ?? '{}'));
+      existing['$tmdbId'] = stars;
+      await prefs.setString(key, jsonEncode(existing));
+    } catch (e) {
+      debugPrint('Error saving rating: $e');
+    }
+    notifyListeners();
+  }
+
+  Future<void> _loadRatings() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final key = 'streamsync_${_activeScope}_ratings';
+      final raw = prefs.getString(key);
+      if (raw != null) {
+        final map = Map<String, dynamic>.from(jsonDecode(raw));
+        _ratings.clear();
+        map.forEach((k, v) => _ratings[int.tryParse(k) ?? 0] = v as int);
+      }
+    } catch (e) {
+      debugPrint('Error loading ratings: $e');
+    }
+  }
+
   DatabaseService() {
     _loadInitialConfig();
   }
@@ -171,6 +205,7 @@ class DatabaseService extends ChangeNotifier {
 
       _totalHoursWatched = prefs.getInt(statsKey) ?? 0;
       _rebuildIdCaches();
+      await _loadRatings();
       notifyListeners();
     } catch (e) {
       debugPrint('Error loading profile data: $e');
@@ -292,6 +327,7 @@ class DatabaseService extends ChangeNotifier {
         'progress_seconds': 0,
         'duration_seconds': 0,
         'last_watched': DateTime.now().toIso8601String(),
+        'lastWatchedAt': DateTime.now().toIso8601String(),
       });
 
       if (_watchHistory.length > 20) {
@@ -318,11 +354,22 @@ class DatabaseService extends ChangeNotifier {
       if (index != -1) {
         _watchHistory[index]['progress_seconds'] = progress;
         _watchHistory[index]['duration_seconds'] = duration;
+        _watchHistory[index]['lastWatchedAt'] = DateTime.now().toIso8601String();
         await _saveList("streamsync_${_activeScope}_history", _watchHistory);
         // Silent save - no notifyListeners to avoid UI rebuild during playback
       }
     } catch (e) {
       debugPrint('Error updating history progress: $e');
+    }
+  }
+
+  Future<void> clearHistory() async {
+    try {
+      _watchHistory.clear();
+      await _saveList("streamsync_${_activeScope}_history", _watchHistory);
+      notifyListeners();
+    } catch (e) {
+      debugPrint('Error clearing history: $e');
     }
   }
 
@@ -422,19 +469,6 @@ class DatabaseService extends ChangeNotifier {
       notifyListeners();
     } catch (e) {
       debugPrint('Error updating country: $e');
-    }
-  }
-
-  Future<void> clearHistory() async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      _watchHistory.clear();
-      _totalHoursWatched = 0;
-      await prefs.remove("streamsync_${_activeScope}_history");
-      await prefs.remove("streamsync_${_activeScope}_watch_stats");
-      notifyListeners();
-    } catch (e) {
-      debugPrint('Error clearing history: $e');
     }
   }
 

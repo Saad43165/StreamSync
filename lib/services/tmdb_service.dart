@@ -81,6 +81,26 @@ class TMDBService extends ChangeNotifier {
   bool _upcomingTvErrored = false;
   bool get upcomingTvErrored => _upcomingTvErrored;
 
+  // ── Public genre maps (Feature 2) ────────────────────────────────────────
+  static const Map<int, String> movieGenres = {
+    28: 'Action', 12: 'Adventure', 16: 'Animation', 35: 'Comedy',
+    80: 'Crime', 99: 'Documentary', 18: 'Drama', 10751: 'Family',
+    14: 'Fantasy', 36: 'History', 27: 'Horror', 10402: 'Music',
+    9648: 'Mystery', 10749: 'Romance', 878: 'Sci-Fi', 53: 'Thriller',
+    10752: 'War', 37: 'Western',
+  };
+  static const Map<int, String> tvGenres = {
+    10759: 'Action & Adventure', 16: 'Animation', 35: 'Comedy',
+    80: 'Crime', 99: 'Documentary', 18: 'Drama', 10751: 'Family',
+    10762: 'Kids', 9648: 'Mystery', 10763: 'News', 10764: 'Reality',
+    10765: 'Sci-Fi & Fantasy', 10766: 'Soap', 10767: 'Talk',
+    10768: 'War & Politics', 37: 'Western',
+  };
+
+  // ── Error tracking (Feature 7) ─────────────────────────────────────────────
+  String? _lastFetchError;
+  String? get lastFetchError => _lastFetchError;
+
   static const Map<int, String> _movieGenreNames = {
     28: 'Action',
     12: 'Adventure',
@@ -755,9 +775,11 @@ class TMDBService extends ChangeNotifier {
       };
       await cacheBox.put('categories_cache', json.encode(payload));
       await cacheBox.put('categories_cache_ts', DateTime.now().millisecondsSinceEpoch);
+      _lastFetchError = null;
       notifyListeners();
     } catch (e) {
       debugPrint('Error fetching/saving parallel categories queries: $e');
+      _lastFetchError = e.toString();
       await _loadTrendingFromCache();
     } finally {
       _setLoading(false);
@@ -909,22 +931,48 @@ class TMDBService extends ChangeNotifier {
 
   Future<List<dynamic>> fetchRecommendations(int id, String mediaType) async {
     if (!hasApiKey) return _getMockTrending().take(4).toList();
+    // Check Hive cache first
+    try {
+      final cacheBox = Hive.box('tmdb_cache_box');
+      final cached = cacheBox.get('recommendations_${mediaType}_$id');
+      if (cached != null) return List<dynamic>.from(cached as List);
+    } catch (_) {}
+    final type = mediaType == 'movie' ? 'movie' : 'tv';
     try {
       final res = await http
           .get(Uri.parse(
-          '$_baseUrl/$mediaType/$id/recommendations?api_key=${AppConfig.tmdbApiKey}'))
+          '$_baseUrl/$type/$id/recommendations?api_key=${AppConfig.tmdbApiKey}&language=en-US&page=1'))
           .timeout(const Duration(seconds: 15));
       if (res.statusCode == 200) {
-        final data = json.decode(res.body);
-        return (data['results'] as List<dynamic>? ?? []).map((item) {
-          item['media_type'] = mediaType;
-          return item;
-        }).toList();
+        final results = (json.decode(res.body)['results'] as List?) ?? [];
+        final typed = results.map((r) {
+          r['media_type'] = mediaType;
+          return r;
+        }).take(20).toList();
+        try {
+          final cacheBox = Hive.box('tmdb_cache_box');
+          await cacheBox.put('recommendations_${mediaType}_$id', typed);
+        } catch (_) {}
+        return typed;
       }
     } catch (e) {
       debugPrint('Error fetching TMDB recommendations: $e');
     }
     return [];
+  }
+
+  /// Fetch person details + combined credits (Feature 3)
+  Future<Map<String, dynamic>?> fetchPerson(int personId) async {
+    try {
+      final res = await http
+          .get(Uri.parse(
+          '${_baseUrl}person/$personId?api_key=${AppConfig.tmdbApiKey}&append_to_response=combined_credits'))
+          .timeout(const Duration(seconds: 15));
+      if (res.statusCode == 200) return json.decode(res.body) as Map<String, dynamic>;
+    } catch (e) {
+      debugPrint('Error fetching person $personId: $e');
+    }
+    return null;
   }
 
   /// FIX 15: Centralised filtered-results fetch used by FilteredResultsScreen.
