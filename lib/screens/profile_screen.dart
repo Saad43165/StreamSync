@@ -5,6 +5,7 @@ import 'package:provider/provider.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import '../services/database_service.dart';
 import '../theme/app_theme.dart';
+import '../widgets/ui_kit.dart';
 import 'settings_screen.dart';
 import 'details_screen.dart';
 import 'native_stream_player_screen.dart';
@@ -49,12 +50,7 @@ class _ProfileScreenState extends State<ProfileScreen>
     final username = db.currentProfile;
     final initial = username.isNotEmpty ? username[0].toUpperCase() : 'G';
 
-    final profileColors = {
-      'Enthusiast': AppTheme.accent,
-      'Family': Colors.blueAccent,
-      'Kids': Colors.greenAccent,
-    };
-    final themeColor = profileColors[db.currentProfile] ?? AppTheme.accent;
+    final themeColor = AppTheme.profileColor(db.currentProfile);
 
     return Scaffold(
       backgroundColor: AppTheme.background,
@@ -62,10 +58,21 @@ class _ProfileScreenState extends State<ProfileScreen>
         physics: const BouncingScrollPhysics(),
         headerSliverBuilder: (context, innerBoxScrolled) => [
           SliverAppBar(
-            expandedHeight: 320,
+            expandedHeight: 330,
             pinned: true,
             backgroundColor: AppTheme.background,
             elevation: 0,
+            actions: [
+              IconButton(
+                icon: const Icon(Icons.settings_outlined),
+                tooltip: 'Settings',
+                onPressed: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const SettingsScreen()),
+                ),
+              ),
+              const SizedBox(width: 8),
+            ],
             flexibleSpace: FlexibleSpaceBar(
               background: Stack(
                 children: [
@@ -75,7 +82,7 @@ class _ProfileScreenState extends State<ProfileScreen>
                         begin: Alignment.topCenter,
                         end: Alignment.bottomCenter,
                         colors: [
-                          themeColor.withValues(alpha: 0.3),
+                          themeColor.withValues(alpha: 0.22),
                           AppTheme.background,
                         ],
                       ),
@@ -86,12 +93,12 @@ class _ProfileScreenState extends State<ProfileScreen>
                       child: Column(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
-                          const SizedBox(height: 50),
+                          const SizedBox(height: 36),
                           Stack(
                             alignment: Alignment.center,
                             children: [
                               Container(
-                                width: 100, height: 100,
+                                width: 96, height: 96,
                                 decoration: BoxDecoration(
                                   shape: BoxShape.circle,
                                   gradient: LinearGradient(
@@ -101,17 +108,16 @@ class _ProfileScreenState extends State<ProfileScreen>
                                   ),
                                   boxShadow: [
                                     BoxShadow(
-                                      color: themeColor.withValues(alpha: 0.4),
-                                      blurRadius: 24,
-                                      spreadRadius: 4,
+                                      color: themeColor.withValues(alpha: 0.30),
+                                      blurRadius: 28,
                                     ),
                                   ],
                                 ),
                                 child: Center(
                                   child: Text(initial,
                                     style: const TextStyle(
-                                      fontSize: 42, fontWeight: FontWeight.bold,
-                                      color: Colors.white,
+                                      fontSize: 40, fontWeight: FontWeight.w700,
+                                      color: AppTheme.background,
                                     ),
                                   ),
                                 ),
@@ -125,46 +131,27 @@ class _ProfileScreenState extends State<ProfileScreen>
                               color: Colors.white,
                             ),
                           ),
-                          const SizedBox(height: 4),
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-                            decoration: BoxDecoration(
-                              color: themeColor.withValues(alpha: 0.15),
-                              borderRadius: BorderRadius.circular(20),
-                              border: Border.all(color: themeColor.withValues(alpha: 0.4)),
-                            ),
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Container(
-                                  width: 8,
-                                  height: 8,
-                                  decoration: BoxDecoration(
-                                    color: themeColor,
-                                    shape: BoxShape.circle,
-                                  ),
-                                ),
-                                const SizedBox(width: 6),
-                                Text(db.currentProfile,
-                                  style: TextStyle(
-                                    fontSize: 12, fontWeight: FontWeight.w600,
-                                    color: themeColor,
-                                  ),
-                                ),
-                              ],
-                            ),
+                          const SizedBox(height: 2),
+                          const Text('Local profile',
+                            style: TextStyle(fontSize: 13, color: AppTheme.textSecondary),
                           ),
                           const SizedBox(height: 20),
-                          Padding(
-                            padding: const EdgeInsets.symmetric(horizontal: 32),
+                          Container(
+                            margin: const EdgeInsets.symmetric(horizontal: AppTheme.gutter),
+                            padding: const EdgeInsets.symmetric(vertical: 14),
+                            decoration: BoxDecoration(
+                              color: AppTheme.card.withValues(alpha: 0.85),
+                              borderRadius: BorderRadius.circular(AppTheme.radiusLg),
+                              border: Border.all(color: AppTheme.divider),
+                            ),
                             child: Row(
                               mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                               children: [
-                                _buildStat('$moviesWatched', 'Watched', Icons.movie_rounded, themeColor),
+                                Expanded(child: _buildStat('$moviesWatched', 'Watched', Icons.movie_rounded, themeColor)),
                                 _buildStatDivider(),
-                                _buildStat('${hoursWatched}h', 'Hours', Icons.access_time_rounded, themeColor),
+                                Expanded(child: _buildStat('${hoursWatched}h', 'Hours', Icons.access_time_rounded, themeColor)),
                                 _buildStatDivider(),
-                                _buildStat('$watchlistCount', 'Watchlist', Icons.bookmark_rounded, themeColor),
+                                Expanded(child: _buildStat('$watchlistCount', 'Saved', Icons.bookmark_rounded, themeColor)),
                               ],
                             ),
                           ),
@@ -185,10 +172,6 @@ class _ProfileScreenState extends State<ProfileScreen>
                   controller: _tabController,
                   indicatorColor: themeColor,
                   indicatorWeight: 3,
-                  indicatorSize: TabBarIndicatorSize.label,
-                  labelColor: themeColor,
-                  unselectedLabelColor: Colors.white38,
-                  labelStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold),
                   tabs: [
                     Tab(text: 'Watchlist ($watchlistCount)'),
                     Tab(text: 'History ($moviesWatched)'),
@@ -212,18 +195,18 @@ class _ProfileScreenState extends State<ProfileScreen>
   Widget _buildStat(String value, String label, IconData icon, Color color) {
     return Column(
       children: [
-        Icon(icon, color: color, size: 20),
-        const SizedBox(height: 4),
+        Icon(icon, color: color, size: 18),
+        const SizedBox(height: 6),
         Text(value,
-            style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white)),
-        const SizedBox(height: 2),
-        Text(label, style: const TextStyle(fontSize: 11, color: Colors.white54)),
+            style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w700, color: AppTheme.textPrimary)),
+        const SizedBox(height: 1),
+        Text(label, style: const TextStyle(fontSize: 11.5, color: AppTheme.textSecondary)),
       ],
     );
   }
 
   Widget _buildStatDivider() {
-    return Container(width: 1, height: 40, color: Colors.white12);
+    return Container(width: 1, height: 40, color: AppTheme.divider);
   }
 
   Widget _buildPoster({
@@ -294,8 +277,8 @@ class _ProfileScreenState extends State<ProfileScreen>
     if (db.watchlist.isEmpty) {
       return _buildEmptyState(
         icon: Icons.bookmark_border_rounded,
-        title: 'No Watchlist Yet',
-        subtitle: 'Add movies & shows to your watchlist\nand they will appear here.',
+        title: 'Nothing saved yet',
+        subtitle: 'Titles you bookmark show up here.',
       );
     }
 
@@ -387,10 +370,10 @@ class _ProfileScreenState extends State<ProfileScreen>
                             const SizedBox(height: 2),
                             Row(
                               children: [
-                                const Icon(Icons.star_rounded, color: AppTheme.secondaryAccent, size: 10),
+                                const Icon(Icons.star_rounded, color: AppTheme.gold, size: 10),
                                 const SizedBox(width: 2),
                                 Text(rating.toStringAsFixed(1),
-                                    style: const TextStyle(color: AppTheme.secondaryAccent, fontSize: 9, fontWeight: FontWeight.bold)),
+                                    style: const TextStyle(color: AppTheme.gold, fontSize: 9, fontWeight: FontWeight.bold)),
                               ],
                             ),
                           ],
@@ -411,8 +394,8 @@ class _ProfileScreenState extends State<ProfileScreen>
     if (db.watchHistory.isEmpty) {
       return _buildEmptyState(
         icon: Icons.history_rounded,
-        title: 'No Watch History',
-        subtitle: 'Movies and shows you watch\nwill appear here.',
+        title: 'No watch history',
+        subtitle: 'Movies and shows you watch will appear here.',
       );
     }
 
@@ -515,32 +498,12 @@ class _ProfileScreenState extends State<ProfileScreen>
   }
 
   Widget _buildEmptyState({required IconData icon, required String title, required String subtitle}) {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(32),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Container(
-              width: 80, height: 80,
-              decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.04), shape: BoxShape.circle),
-              child: Icon(icon, color: Colors.white24, size: 36),
-            ),
-            const SizedBox(height: 20),
-            Text(title, style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
-            const SizedBox(height: 8),
-            Text(subtitle, textAlign: TextAlign.center, style: const TextStyle(color: Colors.white54, fontSize: 13, height: 1.5)),
-          ],
-        ),
-      ),
-    );
+    return EmptyState(icon: icon, title: title, message: subtitle);
   }
 
   void _showItemOptions(BuildContext context, Map<String, dynamic> item, DatabaseService db) {
     showModalBottomSheet(
       context: context,
-      backgroundColor: AppTheme.surface,
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
       builder: (ctx) => SafeArea(
         child: Column(
           mainAxisSize: MainAxisSize.min,

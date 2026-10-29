@@ -1097,6 +1097,13 @@ class TMDBService extends ChangeNotifier {
       'genres': genreNames,
       'seasons': safeSeasons,
       'trailer_id': (trailerVideo is Map) ? trailerVideo['key'] : null,
+      'runtime': data['runtime'] ??
+          ((data['episode_run_time'] is List &&
+                  (data['episode_run_time'] as List).isNotEmpty)
+              ? data['episode_run_time'][0]
+              : null),
+      'number_of_seasons': data['number_of_seasons'],
+      'tagline': data['tagline'],
       'cast': castList,
       'free_options': _mapProviders([...freeProviders, ...adsProviders]),
       'subscription_options': _mapProviders(subscriptionProviders),

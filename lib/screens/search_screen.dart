@@ -6,6 +6,7 @@ import 'package:cached_network_image/cached_network_image.dart';
 import '../services/tmdb_service.dart';
 import '../theme/app_theme.dart';
 import '../widgets/shimmer_loading.dart';
+import '../widgets/ui_kit.dart';
 import 'details_screen.dart';
 
 class SearchScreen extends StatefulWidget {
@@ -196,7 +197,7 @@ class _SearchScreenState extends State<SearchScreen>
 
             // ── Searching: type filter + results grid ─────────────────────────
             else ...[
-              SliverToBoxAdapter(child: _buildTypeFilter()),
+              SliverToBoxAdapter(child: _buildTypeFilter(results.length, tmdb.isLoading)),
               if (tmdb.isLoading)
                 SliverToBoxAdapter(
                   child: SizedBox(
@@ -226,10 +227,10 @@ class _SearchScreenState extends State<SearchScreen>
       child: Row(children: [
         Expanded(
           child: Container(
-            height: 46,
+            height: 48,
             decoration: BoxDecoration(
-              color: const Color(0xFF1C1C2E),
-              borderRadius: BorderRadius.circular(12),
+              color: AppTheme.surfaceRaised,
+              borderRadius: BorderRadius.circular(AppTheme.radiusMd),
               border: Border.all(
                 color: _searchFocusNode.hasFocus
                     ? AppTheme.accent
@@ -300,84 +301,80 @@ class _SearchScreenState extends State<SearchScreen>
       margin: const EdgeInsets.fromLTRB(16, 0, 16, 12),
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
       decoration: BoxDecoration(
-        color: Colors.redAccent.withValues(alpha: 0.1),
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: Colors.redAccent.withValues(alpha: 0.3)),
+        color: AppTheme.danger.withValues(alpha: 0.10),
+        borderRadius: BorderRadius.circular(AppTheme.radiusMd),
+        border: Border.all(color: AppTheme.danger.withValues(alpha: 0.25)),
       ),
       child: const Row(children: [
-        Icon(Icons.wifi_off_rounded, color: Colors.redAccent, size: 15),
+        Icon(Icons.wifi_off_rounded, color: AppTheme.danger, size: 15),
         SizedBox(width: 8),
         Expanded(
           child: Text("Can't reach the server — showing cached results.",
-              style: TextStyle(color: Colors.redAccent, fontSize: 11.5)),
+              style: TextStyle(color: AppTheme.textPrimary, fontSize: 12)),
         ),
       ]),
     );
   }
 
   Widget _buildRecentSearches() {
+    final recent = _recentSearches.take(8).toList();
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+      padding: const EdgeInsets.fromLTRB(20, 4, 8, 8),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            const Text('RECENT',
-                style: TextStyle(
-                    color: Colors.white38,
-                    fontSize: 11,
-                    fontWeight: FontWeight.bold,
-                    letterSpacing: 1.4)),
-            GestureDetector(
-              onTap: _clearRecentSearches,
-              child: const Text('Clear',
+            const Expanded(
+              child: Text('Recent searches',
                   style: TextStyle(
-                      color: AppTheme.accent,
-                      fontSize: 12,
+                      color: AppTheme.textPrimary,
+                      fontSize: 15,
                       fontWeight: FontWeight.w600)),
+            ),
+            TextButton(
+              onPressed: _clearRecentSearches,
+              style: TextButton.styleFrom(
+                foregroundColor: AppTheme.textSecondary,
+                minimumSize: const Size(0, 36),
+              ),
+              child: const Text('Clear'),
             ),
           ],
         ),
-        const SizedBox(height: 10),
-        ...List.generate(_recentSearches.length > 5 ? 5 : _recentSearches.length,
-            (i) {
-          final q = _recentSearches[i];
-          return GestureDetector(
-            onTap: () {
-              _searchController.text = q;
-              _runSearch(q);
-              _saveRecentSearch(q);
-              setState(() {});
-            },
-            child: Padding(
-              padding: const EdgeInsets.symmetric(vertical: 8),
-              child: Row(children: [
-                const Icon(Icons.history_rounded,
-                    color: Colors.white24, size: 18),
-                const SizedBox(width: 12),
-                Expanded(
-                    child: Text(q,
-                        style: const TextStyle(
-                            color: Colors.white70, fontSize: 14))),
-                const Icon(Icons.north_west_rounded,
-                    color: Colors.white24, size: 16),
-              ]),
-            ),
-          );
-        }),
-        const Divider(color: Colors.white10, height: 24),
+        const SizedBox(height: 4),
+        Padding(
+          padding: const EdgeInsets.only(right: 12),
+          child: Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              for (final q in recent)
+                ActionChip(
+                  avatar: const Icon(Icons.history_rounded,
+                      size: 16, color: AppTheme.textSecondary),
+                  label: Text(q, overflow: TextOverflow.ellipsis),
+                  onPressed: () {
+                    _searchController.text = q;
+                    _runSearch(q);
+                    _saveRecentSearch(q);
+                    setState(() {});
+                  },
+                ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 12),
       ]),
     );
   }
 
   Widget _buildBrowseHeader() {
     return const Padding(
-      padding: EdgeInsets.fromLTRB(16, 4, 16, 12),
-      child: Text('Browse by Genre',
+      padding: EdgeInsets.fromLTRB(20, 8, 16, 12),
+      child: Text('Browse by genre',
           style: TextStyle(
-              color: Colors.white,
-              fontSize: 20,
-              fontWeight: FontWeight.bold,
+              color: AppTheme.textPrimary,
+              fontSize: 19,
+              fontWeight: FontWeight.w700,
               letterSpacing: -0.3)),
     );
   }
@@ -387,40 +384,52 @@ class _SearchScreenState extends State<SearchScreen>
       delegate: SliverChildBuilderDelegate(
         (_, i) {
           final genre = _genres[i];
-          return GestureDetector(
-            onTap: () => _onGenreTap(genre),
-            child: Container(
-              decoration: BoxDecoration(
-                color: genre.color,
-                borderRadius: BorderRadius.circular(10),
-                gradient: LinearGradient(
-                  colors: [
-                    genre.color,
-                    genre.color.withValues(alpha: 0.6),
-                  ],
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                ),
-              ),
-              child: Stack(children: [
-                Positioned(
-                  right: -8, bottom: -8,
-                  child: Icon(
-                    _genreIcon(genre.label),
-                    size: 64,
-                    color: Colors.white.withValues(alpha: 0.15),
+          return Material(
+            color: AppTheme.card,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(AppTheme.radiusMd),
+              side: BorderSide(color: genre.color.withValues(alpha: 0.28)),
+            ),
+            clipBehavior: Clip.antiAlias,
+            child: InkWell(
+              onTap: () => _onGenreTap(genre),
+              child: Ink(
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    colors: [
+                      genre.color.withValues(alpha: 0.30),
+                      genre.color.withValues(alpha: 0.06),
+                    ],
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
                   ),
                 ),
-                Padding(
-                  padding: const EdgeInsets.all(12),
-                  child: Text(genre.label,
-                      style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 14,
-                          fontWeight: FontWeight.bold,
-                          letterSpacing: -0.2)),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                  child: Row(children: [
+                    Container(
+                      width: 34,
+                      height: 34,
+                      decoration: BoxDecoration(
+                        color: genre.color.withValues(alpha: 0.28),
+                        borderRadius: BorderRadius.circular(AppTheme.radiusSm),
+                      ),
+                      child: Icon(_genreIcon(genre.label),
+                          size: 19, color: Colors.white),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Text(genre.label,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                              color: AppTheme.textPrimary,
+                              fontSize: 15,
+                              fontWeight: FontWeight.w600)),
+                    ),
+                  ]),
                 ),
-              ]),
+              ),
             ),
           );
         },
@@ -428,16 +437,16 @@ class _SearchScreenState extends State<SearchScreen>
       ),
       gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
         crossAxisCount: 2,
-        childAspectRatio: 2.8,
-        crossAxisSpacing: 8,
-        mainAxisSpacing: 8,
+        childAspectRatio: 2.7,
+        crossAxisSpacing: 10,
+        mainAxisSpacing: 10,
       ),
     );
   }
 
-  Widget _buildTypeFilter() {
+  Widget _buildTypeFilter(int resultCount, bool isLoading) {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
+      padding: const EdgeInsets.fromLTRB(16, 4, 20, 8),
       child: Row(children: [
         _TypeChip(label: 'All', selected: _selectedType == null,
             onTap: () => setState(() => _selectedType = null)),
@@ -447,6 +456,12 @@ class _SearchScreenState extends State<SearchScreen>
         const SizedBox(width: 8),
         _TypeChip(label: 'Series', selected: _selectedType == 'tv',
             onTap: () => setState(() => _selectedType = 'tv')),
+        const Spacer(),
+        if (!isLoading)
+          Text(
+            '$resultCount ${resultCount == 1 ? 'result' : 'results'}',
+            style: const TextStyle(color: AppTheme.textSecondary, fontSize: 12.5),
+          ),
       ]),
     );
   }
@@ -466,29 +481,22 @@ class _SearchScreenState extends State<SearchScreen>
       ),
       gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
         crossAxisCount: 3,
-        childAspectRatio: 0.58,
-        crossAxisSpacing: 8,
-        mainAxisSpacing: 8,
+        childAspectRatio: 0.5,
+        crossAxisSpacing: 10,
+        mainAxisSpacing: 14,
       ),
     );
   }
 
   Widget _buildEmptyState() {
     return SizedBox(
-      height: MediaQuery.of(context).size.height * 0.4,
-      child: Center(
-        child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-          const Icon(Icons.search_off_rounded, size: 52, color: Colors.white24),
-          const SizedBox(height: 16),
-          Text(
-            'No results for "${_searchController.text}"',
-            textAlign: TextAlign.center,
-            style: const TextStyle(color: Colors.white54, fontSize: 14),
-          ),
-          const SizedBox(height: 8),
-          const Text('Try a different title or genre',
-              style: TextStyle(color: Colors.white24, fontSize: 12)),
-        ]),
+      height: MediaQuery.of(context).size.height * 0.55,
+      child: EmptyState(
+        icon: Icons.search_off_rounded,
+        title: 'No results for "${_searchController.text.trim()}"',
+        message: _selectedType != null
+            ? 'Try switching the filter to All, or check the spelling.'
+            : 'Check the spelling, or search for an actor or a different title.',
       ),
     );
   }
@@ -524,29 +532,26 @@ class _GenreResultsScreen extends StatelessWidget {
     return Scaffold(
       backgroundColor: AppTheme.background,
       appBar: AppBar(
-        backgroundColor: AppTheme.background,
-        elevation: 0,
-        title: Text(genre.label,
-            style: const TextStyle(
-                color: Colors.white, fontWeight: FontWeight.bold)),
+        title: Text(genre.label),
+        titleSpacing: 0,
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back_ios_new_rounded,
-              color: Colors.white, size: 20),
+          icon: const Icon(Icons.arrow_back_ios_new_rounded, size: 20),
           onPressed: () => Navigator.pop(context),
         ),
       ),
       body: initialItems.isEmpty
-          ? const Center(
-              child: Text('Nothing here yet',
-                  style: TextStyle(color: Colors.white38)))
+          ? const EmptyState(
+              icon: Icons.movie_filter_outlined,
+              title: 'Nothing here yet',
+              message: 'Pull to refresh on Home to load more titles, then try again.')
           : GridView.builder(
               padding: const EdgeInsets.fromLTRB(16, 8, 16, 100),
               physics: const BouncingScrollPhysics(),
               gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
                 crossAxisCount: 3,
-                childAspectRatio: 0.58,
-                crossAxisSpacing: 8,
-                mainAxisSpacing: 8,
+                childAspectRatio: 0.5,
+                crossAxisSpacing: 10,
+                mainAxisSpacing: 14,
               ),
               itemCount: initialItems.length,
               itemBuilder: (_, i) {
@@ -591,101 +596,85 @@ class _SearchPosterCard extends StatelessWidget {
     final rating = (item['vote_average'] as num?)?.toDouble() ?? 0.0;
     final mediaType = item['media_type'] as String?;
 
+    final date = (item['release_date'] ?? item['first_air_date'] ?? '').toString();
+    final year = date.length >= 4 ? date.substring(0, 4) : '';
+
     return GestureDetector(
       onTap: onTap,
-      child: Hero(
-        tag: heroTag,
-        child: ClipRRect(
-          borderRadius: BorderRadius.circular(8),
-          child: Stack(fit: StackFit.expand, children: [
-            // Poster image
-            imageUrl != null
-                ? CachedNetworkImage(
-                    imageUrl: imageUrl,
-                    fit: BoxFit.cover,
-                    placeholder: (_, __) => Container(
-                        color: AppTheme.surface,
-                        child: const ImageShimmerPlaceholder(borderRadius: 8)),
-                    errorWidget: (_, __, ___) => Container(
-                      color: AppTheme.surface,
-                      child: const Icon(Icons.movie_rounded,
-                          color: Colors.white24, size: 32),
-                    ),
-                    memCacheWidth: 200,
-                  )
-                : Container(
-                    color: AppTheme.surface,
-                    child: const Icon(Icons.movie_rounded,
-                        color: Colors.white24, size: 32),
-                  ),
+      behavior: HitTestBehavior.opaque,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Expanded(
+            child: Hero(
+              tag: heroTag,
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(AppTheme.radiusSm),
+                child: Stack(fit: StackFit.expand, children: [
+                  imageUrl != null
+                      ? CachedNetworkImage(
+                          imageUrl: imageUrl,
+                          fit: BoxFit.cover,
+                          placeholder: (_, __) => Container(
+                              color: AppTheme.surface,
+                              child: const ImageShimmerPlaceholder(borderRadius: 8)),
+                          errorWidget: (_, __, ___) => Container(
+                            color: AppTheme.surface,
+                            child: const Icon(Icons.movie_rounded,
+                                color: Colors.white24, size: 32),
+                          ),
+                          memCacheWidth: 240,
+                        )
+                      : Container(
+                          color: AppTheme.surface,
+                          child: const Icon(Icons.movie_rounded,
+                              color: Colors.white24, size: 32),
+                        ),
 
-            // Bottom gradient + info
-            Positioned(
-              bottom: 0, left: 0, right: 0,
-              child: Container(
-                decoration: const BoxDecoration(
-                  gradient: LinearGradient(
-                    colors: [Colors.transparent, Color(0xCC000000)],
-                    begin: Alignment.topCenter,
-                    end: Alignment.bottomCenter,
-                  ),
-                ),
-                padding: const EdgeInsets.fromLTRB(6, 16, 6, 6),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(name,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 10,
-                            fontWeight: FontWeight.w600,
-                            height: 1.3)),
-                    if (rating > 0) ...[
-                      const SizedBox(height: 3),
-                      Row(children: [
-                        const Icon(Icons.star_rounded,
-                            color: Color(0xFFF5C842), size: 10),
-                        const SizedBox(width: 2),
-                        Text(rating.toStringAsFixed(1),
-                            style: const TextStyle(
-                                color: Color(0xFFF5C842),
-                                fontSize: 9,
-                                fontWeight: FontWeight.bold)),
-                      ]),
-                    ],
-                  ],
-                ),
+                  // Rating badge bottom-right
+                  if (rating > 0)
+                    Positioned(
+                      right: 6,
+                      bottom: 6,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: Colors.black.withValues(alpha: 0.65),
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                        child: Row(mainAxisSize: MainAxisSize.min, children: [
+                          const Icon(Icons.star_rounded, color: AppTheme.gold, size: 11),
+                          const SizedBox(width: 2),
+                          Text(rating.toStringAsFixed(1),
+                              style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.w700)),
+                        ]),
+                      ),
+                    ),
+                ]),
               ),
             ),
-
-            // Type badge top-left
-            if (mediaType != null)
-              Positioned(
-                top: 6, left: 6,
-                child: Container(
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 5, vertical: 2),
-                  decoration: BoxDecoration(
-                    color: (mediaType == 'tv'
-                            ? Colors.blueAccent
-                            : Colors.deepPurpleAccent)
-                        .withValues(alpha: 0.9),
-                    borderRadius: BorderRadius.circular(4),
-                  ),
-                  child: Text(
-                    mediaType == 'tv' ? 'TV' : 'FILM',
-                    style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 8,
-                        fontWeight: FontWeight.bold),
-                  ),
-                ),
-              ),
-          ]),
-        ),
+          ),
+          const SizedBox(height: 7),
+          Text(name,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                  color: AppTheme.textPrimary,
+                  fontSize: 12.5,
+                  fontWeight: FontWeight.w600)),
+          const SizedBox(height: 2),
+          Text(
+            [
+              if (mediaType != null) mediaType == 'tv' ? 'Series' : 'Film',
+              if (year.isNotEmpty) year,
+            ].join(' · '),
+            maxLines: 1,
+            style: const TextStyle(color: AppTheme.textSecondary, fontSize: 11.5),
+          ),
+        ],
       ),
     );
   }
@@ -705,18 +694,18 @@ class _TypeChip extends StatelessWidget {
       onTap: onTap,
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 180),
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 7),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
         decoration: BoxDecoration(
-          color: selected ? AppTheme.accent : Colors.white.withValues(alpha: 0.07),
+          color: selected ? AppTheme.accent : Colors.white.withValues(alpha: 0.06),
           borderRadius: BorderRadius.circular(20),
           border: Border.all(
-            color: selected ? AppTheme.accent : Colors.white.withValues(alpha: 0.12),
+            color: selected ? AppTheme.accent : AppTheme.stroke,
           ),
         ),
         child: Text(label,
             style: TextStyle(
-                color: selected ? Colors.black : Colors.white70,
-                fontSize: 12,
+                color: selected ? AppTheme.background : AppTheme.textPrimary,
+                fontSize: 13,
                 fontWeight:
                     selected ? FontWeight.bold : FontWeight.w500)),
       ),

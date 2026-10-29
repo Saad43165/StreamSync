@@ -9,6 +9,7 @@ import '../services/tmdb_service.dart';
 import '../services/database_service.dart';
 import '../services/download_service.dart';
 import '../theme/app_theme.dart';
+import '../widgets/ui_kit.dart';
 import '../widgets/glass_card.dart';
 import '../widgets/shimmer_loading.dart';
 import 'native_stream_player_screen.dart';
@@ -430,19 +431,23 @@ class _DetailsScreenState extends State<DetailsScreen> with TickerProviderStateM
     final backdropUrl = _buildImageUrl(details['backdrop_path'], width: 1280);
     final trailerId = details['trailer_id'];
 
+    final runtime = (details['runtime'] as num?)?.toInt();
+    final seasonCount = (details['number_of_seasons'] as num?)?.toInt();
+    final tagline = (details['tagline'] as String?)?.trim() ?? '';
+    final heroHeight = MediaQuery.sizeOf(context).height * 0.58;
+
+    Future<void> openTrailer() async {
+      final url = Uri.parse('https://www.youtube.com/watch?v=$trailerId');
+      if (await canLaunchUrl(url)) {
+        await launchUrl(url, mode: LaunchMode.externalApplication);
+      }
+    }
+
     return Scaffold(
       backgroundColor: AppTheme.background,
       extendBodyBehindAppBar: true,
       body: Stack(
         children: [
-          // Parallax backdrop with scroll offset
-          Positioned.fill(
-            child: _ParallaxBackdrop(
-              imageUrl: backdropUrl,
-              scrollOffset: _scrollOffset,
-            ),
-          ),
-
           // Scrollable content with fade animation
           FadeTransition(
             opacity: _fadeAnimation,
@@ -452,79 +457,75 @@ class _DetailsScreenState extends State<DetailsScreen> with TickerProviderStateM
                 controller: _scrollController,
                 physics: const BouncingScrollPhysics(),
                 slivers: [
-                  // Top spacing
+                  // Full-bleed backdrop with the poster and title over its fade
                   SliverToBoxAdapter(
-                    child: SizedBox(
-                      height: MediaQuery.of(context).padding.top + 44,
-                    ),
-                  ),
-
-                  // Trailer or backdrop fallback
-                  SliverToBoxAdapter(
-                    child: trailerId != null
-                        ? _TrailerThumbnail(
-                      trailerId: trailerId.toString(),
-                      onTap: () async {
-                        final url = Uri.parse(
-                            'https://www.youtube.com/watch?v=$trailerId');
-                        if (await canLaunchUrl(url)) {
-                          await launchUrl(url,
-                              mode: LaunchMode.externalApplication);
-                        }
-                      },
-                    )
-                        : _BackdropFallback(imageUrl: backdropUrl),
-                  ),
-
-                  // Content sections
-                  SliverToBoxAdapter(child: const SizedBox(height: 20)),
-
-                  SliverToBoxAdapter(
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 20),
+                    child: _DetailsHero(
+                      height: heroHeight,
+                      backdropUrl: backdropUrl,
+                      scrollOffset: _scrollOffset,
                       child: _TitleBlock(
                         posterUrl: widget.posterUrl ?? details['poster_path'],
                         posterHeroTag: widget.heroTag ?? 'poster_${widget.id}',
                         title: title,
-                        rating: rating,
+                        tagline: tagline,
+                        rating: voteAverage > 0 ? rating : null,
                         releaseYear: releaseYear,
+                        isTv: widget.mediaType == 'tv',
+                        runtimeMinutes: runtime,
+                        seasonCount: seasonCount,
                       ),
                     ),
                   ),
 
-                  SliverToBoxAdapter(child: const SizedBox(height: 16)),
-
-                  // Star rating row (Feature 6)
-                  SliverToBoxAdapter(
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 20),
-                      child: _StarRatingRow(tmdbId: widget.id, mediaType: widget.mediaType),
+                  if (genresList.isNotEmpty)
+                    SliverToBoxAdapter(
+                      child: Padding(
+                        padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
+                        child: _GenreRow(genres: genresList),
+                      ),
                     ),
-                  ),
 
-                  SliverToBoxAdapter(child: const SizedBox(height: 16)),
+                  const SliverToBoxAdapter(child: SizedBox(height: 20)),
 
-                  // Watch button
+                  // Watch, watchlist and trailer actions
                   SliverToBoxAdapter(
-                    child: _buildWatchStreamButton(context, details),
+                    child: _buildWatchStreamButton(
+                      context,
+                      details,
+                      onTrailer: trailerId != null ? openTrailer : null,
+                    ),
                   ),
 
                   // Details sections
                   SliverToBoxAdapter(
                     child: Padding(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 20, vertical: 16),
+                      padding: const EdgeInsets.fromLTRB(20, 28, 20, 16),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          if (genresList.isNotEmpty) ...[
-                            _GenreRow(genres: genresList),
-                            const SizedBox(height: 26),
+                          const _SectionHeader(label: 'Storyline'),
+                          const SizedBox(height: 10),
+                          _ExpandableText(
+                            text: overview.isEmpty
+                                ? 'No description available.'
+                                : overview,
+                          ),
+
+                          const SizedBox(height: 24),
+                          _StarRatingRow(tmdbId: widget.id, mediaType: widget.mediaType),
+
+                          if (castList.isNotEmpty) ...[
+                            const SizedBox(height: 32),
+                            const _SectionHeader(label: 'Cast'),
+                            const SizedBox(height: 14),
+                            _CastRow(castList: castList),
                           ],
 
-                          const _SectionHeader(
-                              icon: Icons.play_circle_outline_rounded,
-                              label: 'Watch free'),
+                          const SizedBox(height: 32),
+                          const _SectionHeader(label: 'Where to watch'),
+                          const SizedBox(height: 4),
+                          const Text('Free with ads or no subscription',
+                              style: TextStyle(color: AppTheme.textSecondary, fontSize: 13)),
                           const SizedBox(height: 12),
                           _buildWatchProvidersSection(
                             context,
@@ -532,12 +533,9 @@ class _DetailsScreenState extends State<DetailsScreen> with TickerProviderStateM
                             providers: freeOptions,
                             isFree: true,
                           ),
-
-                          const SizedBox(height: 26),
-
-                          const _SectionHeader(
-                              icon: Icons.workspace_premium_outlined,
-                              label: 'Also on subscription'),
+                          const SizedBox(height: 20),
+                          const Text('On subscription services',
+                              style: TextStyle(color: AppTheme.textSecondary, fontSize: 13)),
                           const SizedBox(height: 12),
                           _buildWatchProvidersSection(
                             context,
@@ -546,34 +544,10 @@ class _DetailsScreenState extends State<DetailsScreen> with TickerProviderStateM
                             isFree: false,
                           ),
 
-                          const SizedBox(height: 26),
-
-                          const _SectionHeader(
-                              icon: Icons.notes_rounded,
-                              label: 'Synopsis'),
-                          const SizedBox(height: 10),
-                          _ExpandableText(
-                            text: overview.isEmpty
-                                ? 'No description available.'
-                                : overview,
-                          ),
-
-                          const SizedBox(height: 26),
-
-                          if (castList.isNotEmpty) ...[
-                            const _SectionHeader(
-                                icon: Icons.groups_2_outlined,
-                                label: 'Cast & crew'),
-                            const SizedBox(height: 14),
-                            _CastRow(castList: castList),
-                          ],
-
                           // Recommendations row (Feature 1)
                           if (_recsLoading || _recommendations.isNotEmpty) ...[
-                            const SizedBox(height: 26),
-                            const _SectionHeader(
-                                icon: Icons.recommend_rounded,
-                                label: 'More Like This'),
+                            const SizedBox(height: 32),
+                            const _SectionHeader(label: 'More like this'),
                             const SizedBox(height: 14),
                             if (_recsLoading)
                               ShimmerLoadingPresets.horizontalPostersSkeleton()
@@ -662,7 +636,8 @@ class _DetailsScreenState extends State<DetailsScreen> with TickerProviderStateM
   // ── Watch button ───────────────────────────────────────────────────────
 
   Widget _buildWatchStreamButton(
-      BuildContext context, Map<String, dynamic> details) {
+      BuildContext context, Map<String, dynamic> details,
+      {VoidCallback? onTrailer}) {
     final title = details['title'] ?? details['name'] ?? 'Untitled';
     final isTv = widget.mediaType == 'tv';
 
@@ -704,17 +679,13 @@ class _DetailsScreenState extends State<DetailsScreen> with TickerProviderStateM
                   ),
                 );              },
               child: Ink(
-                height: 58,
+                height: 54,
                 decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(16),
-                  gradient: const LinearGradient(
-                    colors: [Color(0xFF6C63FF), Color(0xFF8B5CF6)],
-                    begin: Alignment.centerLeft,
-                    end: Alignment.centerRight,
-                  ),
+                  borderRadius: BorderRadius.circular(AppTheme.radiusMd),
+                  gradient: AppTheme.ctaGradient,
                   boxShadow: [
                     BoxShadow(
-                      color: const Color(0xFF6C63FF).withValues(alpha: 0.35),
+                      color: AppTheme.secondaryAccent.withValues(alpha: 0.30),
                       blurRadius: 18,
                       offset: const Offset(0, 8),
                     ),
@@ -751,8 +722,30 @@ class _DetailsScreenState extends State<DetailsScreen> with TickerProviderStateM
 
           const SizedBox(height: 10),
 
-          _WatchlistButton(
-              itemId: widget.id, mediaType: widget.mediaType, details: details),
+          Row(
+            children: [
+              Expanded(
+                child: _WatchlistButton(
+                    itemId: widget.id, mediaType: widget.mediaType, details: details),
+              ),
+              if (onTrailer != null) ...[
+                const SizedBox(width: 10),
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: onTrailer,
+                    icon: const Icon(Icons.smart_display_outlined, size: 19),
+                    label: const Text('Trailer'),
+                    style: OutlinedButton.styleFrom(
+                      minimumSize: const Size.fromHeight(48),
+                      backgroundColor: Colors.white.withValues(alpha: 0.05),
+                      side: const BorderSide(color: Colors.white24),
+                      textStyle: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13.5),
+                    ),
+                  ),
+                ),
+              ],
+            ],
+          ),
         ],
       ),
     );
@@ -950,47 +943,64 @@ class _DetailsScreenState extends State<DetailsScreen> with TickerProviderStateM
 // New Performance Widgets
 // ═══════════════════════════════════════════════════════════════════════════
 
-class _ParallaxBackdrop extends StatelessWidget {
-  final String imageUrl;
+/// Full-bleed backdrop that drifts slower than the content (parallax) and
+/// fades into the page, with [child] pinned to its bottom edge.
+class _DetailsHero extends StatelessWidget {
+  final double height;
+  final String backdropUrl;
   final double scrollOffset;
+  final Widget child;
 
-  const _ParallaxBackdrop({
-    required this.imageUrl,
+  const _DetailsHero({
+    required this.height,
+    required this.backdropUrl,
     required this.scrollOffset,
+    required this.child,
   });
 
   @override
   Widget build(BuildContext context) {
-    return Stack(
-      children: [
-        Transform.translate(
-          offset: Offset(0, scrollOffset * 0.3),
-          child: CachedNetworkImage(
-            imageUrl: imageUrl,
-            fit: BoxFit.cover,
-            width: double.infinity,
-            height: MediaQuery.of(context).size.height * 0.7,
-            placeholder: (_, __) => Container(color: AppTheme.surface),
-            errorWidget: (_, __, ___) => Container(color: AppTheme.surface),
-            memCacheWidth: 640,
-            maxWidthDiskCache: 1280,
-          ),
-        ),
-        Container(
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              colors: [
-                Colors.black.withValues(alpha: 0.35),
-                AppTheme.background.withValues(alpha: 0.92),
-                AppTheme.background,
-              ],
-              begin: Alignment.topCenter,
-              end: Alignment.bottomCenter,
-              stops: const [0.0, 0.38, 0.62],
+    return SizedBox(
+      height: height,
+      child: Stack(
+        clipBehavior: Clip.none,
+        children: [
+          Positioned.fill(
+            child: ClipRect(
+              child: Transform.translate(
+                offset: Offset(0, scrollOffset.clamp(0, height) * 0.4),
+                child: CachedNetworkImage(
+                  imageUrl: backdropUrl,
+                  fit: BoxFit.cover,
+                  alignment: Alignment.topCenter,
+                  placeholder: (_, __) => Container(color: AppTheme.surface),
+                  errorWidget: (_, __, ___) => Container(color: AppTheme.surface),
+                  memCacheWidth: 900,
+                  maxWidthDiskCache: 1280,
+                ),
+              ),
             ),
           ),
-        ),
-      ],
+          Positioned.fill(
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  colors: [
+                    Colors.black.withValues(alpha: 0.30),
+                    Colors.transparent,
+                    AppTheme.background.withValues(alpha: 0.85),
+                    AppTheme.background,
+                  ],
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  stops: const [0.0, 0.25, 0.75, 1.0],
+                ),
+              ),
+            ),
+          ),
+          Positioned(left: 20, right: 20, bottom: 0, child: child),
+        ],
+      ),
     );
   }
 }
@@ -1200,235 +1210,123 @@ class _GlassIconButton extends StatelessWidget {
   }
 }
 
-class _TrailerThumbnail extends StatelessWidget {
-  final String trailerId;
-  final VoidCallback onTap;
-  const _TrailerThumbnail({
-    required this.trailerId,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        margin: const EdgeInsets.symmetric(horizontal: 16),
-        height: 210,
-        clipBehavior: Clip.antiAlias,
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(18),
-          border: Border.all(color: Colors.white10),
-          boxShadow: const [
-            BoxShadow(
-                color: Colors.black54,
-                blurRadius: 15,
-                offset: Offset(0, 6))
-          ],
-        ),
-        child: Stack(
-          fit: StackFit.expand,
-          children: [
-            CachedNetworkImage(
-              imageUrl: 'https://img.youtube.com/vi/$trailerId/hqdefault.jpg',
-              fit: BoxFit.cover,
-              placeholder: (_, __) => Container(color: AppTheme.surface),
-              errorWidget: (_, __, ___) => Container(color: AppTheme.surface),
-              memCacheWidth: 640,
-            ),
-            Container(color: Colors.black.withValues(alpha: 0.15)),
-            Center(
-              child: Container(
-                width: 58,
-                height: 58,
-                decoration: BoxDecoration(
-                  color: Colors.black.withValues(alpha: 0.55),
-                  shape: BoxShape.circle,
-                  border: Border.all(color: Colors.white24),
-                ),
-                child: const Icon(Icons.play_arrow_rounded,
-                    color: Colors.white, size: 32),
-              ),
-            ),
-            Positioned(
-              left: 12,
-              bottom: 10,
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                decoration: BoxDecoration(
-                    color: Colors.black.withValues(alpha: 0.6),
-                    borderRadius: BorderRadius.circular(6)),
-                child: const Text('TRAILER',
-                    style: TextStyle(
-                        color: Colors.white,
-                        fontSize: 10,
-                        fontWeight: FontWeight.bold,
-                        letterSpacing: 0.6)),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _BackdropFallback extends StatelessWidget {
-  final String imageUrl;
-  const _BackdropFallback({required this.imageUrl});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      height: 220,
-      width: double.infinity,
-      margin: const EdgeInsets.symmetric(horizontal: 16),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(18),
-        boxShadow: const [
-          BoxShadow(color: Colors.black45, blurRadius: 10)
-        ],
-      ),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(18),
-        child: Stack(
-          fit: StackFit.expand,
-          children: [
-            CachedNetworkImage(
-              imageUrl: imageUrl,
-              fit: BoxFit.cover,
-              placeholder: (_, __) => Container(color: AppTheme.surface),
-              errorWidget: (_, __, ___) => Container(
-                color: AppTheme.surface,
-                child: const Icon(Icons.movie,
-                    color: Colors.white24, size: 54),
-              ),
-              memCacheWidth: 640,
-            ),
-            Container(
-              color: Colors.black38,
-              child: const Center(
-                  child: Icon(Icons.play_circle_outline,
-                      size: 54, color: Colors.white70)),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
 class _TitleBlock extends StatelessWidget {
   final dynamic posterUrl;
   final String posterHeroTag;
   final String title;
-  final String rating;
+  final String tagline;
+  final String? rating;
   final String releaseYear;
+  final bool isTv;
+  final int? runtimeMinutes;
+  final int? seasonCount;
 
   const _TitleBlock({
     required this.posterUrl,
     required this.posterHeroTag,
     required this.title,
+    required this.tagline,
     required this.rating,
     required this.releaseYear,
+    required this.isTv,
+    this.runtimeMinutes,
+    this.seasonCount,
   });
+
+  String? get _lengthLabel {
+    if (isTv && seasonCount != null && seasonCount! > 0) {
+      return seasonCount == 1 ? '1 season' : '$seasonCount seasons';
+    }
+    final m = runtimeMinutes;
+    if (m == null || m <= 0) return null;
+    if (m < 60) return '${m}m';
+    return '${m ~/ 60}h ${m % 60}m';
+  }
 
   @override
   Widget build(BuildContext context) {
+    final meta = <Widget>[
+      if (rating != null)
+        MetaBadge(text: rating!, icon: Icons.star_rounded, color: AppTheme.gold),
+      MetaBadge(
+          text: isTv ? 'SERIES' : 'FILM',
+          color: isTv ? AppTheme.accent : AppTheme.secondaryAccent),
+      if (releaseYear.isNotEmpty && releaseYear != 'N/A')
+        _MetaText(releaseYear),
+      if (_lengthLabel != null) _MetaText(_lengthLabel!),
+    ];
+
     return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
+      crossAxisAlignment: CrossAxisAlignment.end,
       children: [
         if (posterUrl != null)
           Hero(
             tag: posterHeroTag,
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(14),
-              child: Container(
-                width: 96,
-                height: 144,
-                margin: const EdgeInsets.only(right: 16),
-                decoration: const BoxDecoration(
-                    boxShadow: [
-                      BoxShadow(
-                          color: Colors.black54, blurRadius: 12)
-                    ]),
-                child: CachedNetworkImage(
-                  imageUrl: posterUrl is String ? posterUrl : _DetailsScreenState._buildImageUrl(posterUrl, width: 200),
-                  fit: BoxFit.cover,
-                  placeholder: (_, __) => Container(color: AppTheme.surface),
-                  errorWidget: (_, __, ___) => Container(
-                    color: AppTheme.surface,
-                    child: const Icon(Icons.movie,
-                        color: Colors.white24, size: 32),
-                  ),
-                  memCacheWidth: 200,
+            child: Container(
+              width: 108,
+              height: 162,
+              margin: const EdgeInsets.only(right: 16),
+              clipBehavior: Clip.antiAlias,
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(AppTheme.radiusMd),
+                border: Border.all(color: AppTheme.stroke),
+                boxShadow: const [
+                  BoxShadow(color: Colors.black54, blurRadius: 18, offset: Offset(0, 8)),
+                ],
+              ),
+              child: CachedNetworkImage(
+                imageUrl: posterUrl is String ? posterUrl : _DetailsScreenState._buildImageUrl(posterUrl, width: 200),
+                fit: BoxFit.cover,
+                placeholder: (_, __) => Container(color: AppTheme.surface),
+                errorWidget: (_, __, ___) => Container(
+                  color: AppTheme.surface,
+                  child: const Icon(Icons.movie,
+                      color: Colors.white24, size: 32),
                 ),
+                memCacheWidth: 240,
               ),
             ),
           ),
         Expanded(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
             children: [
               Text(
                 title,
+                maxLines: 3,
+                overflow: TextOverflow.ellipsis,
                 style: const TextStyle(
-                  fontSize: 23,
-                  fontWeight: FontWeight.w800,
-                  color: Colors.white,
-                  letterSpacing: 0.2,
-                  height: 1.2,
+                  fontSize: 26,
+                  fontWeight: FontWeight.w700,
+                  color: AppTheme.textPrimary,
+                  letterSpacing: -0.4,
+                  height: 1.15,
+                  shadows: [Shadow(color: Colors.black54, blurRadius: 12)],
                 ),
               ),
+              if (tagline.isNotEmpty) ...[
+                const SizedBox(height: 6),
+                Text(
+                  tagline,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: AppTheme.textSecondary,
+                    fontSize: 13,
+                    fontStyle: FontStyle.italic,
+                    height: 1.35,
+                  ),
+                ),
+              ],
               const SizedBox(height: 12),
               Wrap(
-                spacing: 10,
+                spacing: 8,
                 runSpacing: 8,
                 crossAxisAlignment: WrapCrossAlignment.center,
-                children: [
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 8, vertical: 4),
-                    decoration: BoxDecoration(
-                      color: AppTheme.secondaryAccent
-                          .withValues(alpha: 0.15),
-                      borderRadius: BorderRadius.circular(7),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        const Icon(Icons.star_rounded,
-                            color: AppTheme.secondaryAccent,
-                            size: 15),
-                        const SizedBox(width: 4),
-                        Text(rating,
-                            style: const TextStyle(
-                                color: AppTheme.secondaryAccent,
-                                fontWeight: FontWeight.bold,
-                                fontSize: 12)),
-                      ],
-                    ),
-                  ),
-                  Text(releaseYear,
-                      style: const TextStyle(
-                          color: AppTheme.textSecondary,
-                          fontSize: 13,
-                          fontWeight: FontWeight.w500)),
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 6, vertical: 2),
-                    decoration: BoxDecoration(
-                      border: Border.all(color: Colors.white30),
-                      borderRadius: BorderRadius.circular(4),
-                    ),
-                    child: const Text('HD',
-                        style: TextStyle(
-                            color: Colors.white70,
-                            fontSize: 10,
-                            fontWeight: FontWeight.bold)),
-                  ),
-                ],
+                children: meta,
               ),
+              const SizedBox(height: 4),
             ],
           ),
         ),
@@ -1437,26 +1335,33 @@ class _TitleBlock extends StatelessWidget {
   }
 }
 
-class _SectionHeader extends StatelessWidget {
-  final IconData icon;
-  final String label;
-  const _SectionHeader({required this.icon, required this.label});
+class _MetaText extends StatelessWidget {
+  final String text;
+  const _MetaText(this.text);
 
   @override
   Widget build(BuildContext context) {
-    return Row(
-      children: [
-        Icon(icon, color: AppTheme.accent, size: 17),
-        const SizedBox(width: 8),
-        Text(
-          label,
-          style: const TextStyle(
-              fontSize: 16,
-              fontWeight: FontWeight.bold,
-              color: Colors.white,
-              letterSpacing: 0.1),
-        ),
-      ],
+    return Text(text,
+        style: const TextStyle(
+            color: AppTheme.textSecondary,
+            fontSize: 13,
+            fontWeight: FontWeight.w500));
+  }
+}
+
+class _SectionHeader extends StatelessWidget {
+  final String label;
+  const _SectionHeader({required this.label});
+
+  @override
+  Widget build(BuildContext context) {
+    return Text(
+      label,
+      style: const TextStyle(
+          fontSize: 19,
+          fontWeight: FontWeight.w700,
+          color: AppTheme.textPrimary,
+          letterSpacing: -0.3),
     );
   }
 }
@@ -1472,13 +1377,13 @@ class _GenreBadge extends StatelessWidget {
       decoration: BoxDecoration(
         color: Colors.white.withValues(alpha: 0.06),
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.1)),
+        border: Border.all(color: AppTheme.stroke),
       ),
       child: Text(name,
           style: const TextStyle(
-              color: AppTheme.textSecondary,
-              fontSize: 11.5,
-              fontWeight: FontWeight.w600)),
+              color: AppTheme.textPrimary,
+              fontSize: 12.5,
+              fontWeight: FontWeight.w500)),
     );
   }
 }
@@ -1694,8 +1599,7 @@ class _WatchlistButton extends StatelessWidget {
               db.addToWatchlist(details);
               ScaffoldMessenger.of(context).showSnackBar(
                   const SnackBar(
-                    content: Text('❤️ Added to watchlist'),
-                    backgroundColor: Color(0xFF6C63FF),
+                    content: Text('Added to watchlist'),
                     duration: Duration(seconds: 1),
                     behavior: SnackBarBehavior.floating,
                   ));
@@ -1707,12 +1611,12 @@ class _WatchlistButton extends StatelessWidget {
             padding: const EdgeInsets.symmetric(vertical: 13),
             decoration: BoxDecoration(
               color: inWatchlist
-                  ? const Color(0xFF6C63FF).withValues(alpha: 0.18)
+                  ? AppTheme.secondaryAccent.withValues(alpha: 0.18)
                   : Colors.white.withValues(alpha: 0.05),
-              borderRadius: BorderRadius.circular(14),
+              borderRadius: BorderRadius.circular(AppTheme.radiusMd),
               border: Border.all(
                   color: inWatchlist
-                      ? const Color(0xFF6C63FF)
+                      ? AppTheme.secondaryAccent
                       : Colors.white24),
             ),
             child: Row(
@@ -1720,10 +1624,10 @@ class _WatchlistButton extends StatelessWidget {
               children: [
                 Icon(
                     inWatchlist
-                        ? Icons.favorite_rounded
-                        : Icons.favorite_border_rounded,
+                        ? Icons.bookmark_rounded
+                        : Icons.bookmark_add_outlined,
                     color: inWatchlist
-                        ? const Color(0xFF6C63FF)
+                        ? AppTheme.secondaryAccent
                         : Colors.white70,
                     size: 19),
                 const SizedBox(width: 8),
@@ -1731,7 +1635,7 @@ class _WatchlistButton extends StatelessWidget {
                     inWatchlist ? 'In watchlist' : 'Add to watchlist',
                     style: TextStyle(
                         color: inWatchlist
-                            ? const Color(0xFF6C63FF)
+                            ? AppTheme.secondaryAccent
                             : Colors.white70,
                         fontWeight: FontWeight.bold,
                         fontSize: 13.5)),
@@ -1759,7 +1663,7 @@ class _StarRatingRow extends StatelessWidget {
     final current = db.getRating(tmdbId, mediaType: mediaType);
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       const Text('Your rating',
-          style: TextStyle(color: Colors.white54, fontSize: 11, fontWeight: FontWeight.w500)),
+          style: TextStyle(color: AppTheme.textSecondary, fontSize: 13, fontWeight: FontWeight.w500)),
       const SizedBox(height: 6),
       Row(
         mainAxisSize: MainAxisSize.min,
@@ -1773,8 +1677,8 @@ class _StarRatingRow extends StatelessWidget {
               padding: const EdgeInsets.only(right: 4),
               child: Icon(
                 filled ? Icons.star_rounded : Icons.star_outline_rounded,
-                color: filled ? AppTheme.accent : Colors.white24,
-                size: 28,
+                color: filled ? AppTheme.gold : Colors.white24,
+                size: 30,
               ),
             ),
           );

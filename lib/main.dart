@@ -68,6 +68,16 @@ class StreamVaultApp extends StatelessWidget {
 class MainNavigationShell extends StatefulWidget {
   const MainNavigationShell({super.key});
 
+  /// Switches the bottom-nav tab from anywhere inside the shell.
+  static void selectTab(BuildContext context, int index) {
+    context.findAncestorStateOfType<_MainNavigationShellState>()?._select(index);
+  }
+
+  /// Hides the floating dock, e.g. while a screen's drawer is open over it.
+  static void setDockVisible(BuildContext context, bool visible) {
+    context.findAncestorStateOfType<_MainNavigationShellState>()?._setDockVisible(visible);
+  }
+
   @override
   State<MainNavigationShell> createState() => _MainNavigationShellState();
 }
@@ -82,6 +92,16 @@ class _MainNavigationShellState extends State<MainNavigationShell> {
     const ProfileScreen(),
   ];
 
+  bool _dockVisible = true;
+
+  void _select(int index) {
+    if (index != _currentIndex) setState(() => _currentIndex = index);
+  }
+
+  void _setDockVisible(bool visible) {
+    if (visible != _dockVisible) setState(() => _dockVisible = visible);
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -94,79 +114,27 @@ class _MainNavigationShellState extends State<MainNavigationShell> {
             children: _screens,
           ),
 
-          // Mini player - only shows when active
+          // Mini player - only shows when active, docked just above the nav dock
           Positioned(
-            left: 0,
-            right: 0,
-            bottom: 56, // height of bottom nav bar — mini player sits just above it
-            child: const MiniPlayerWidget(),
+            left: 12,
+            right: 12,
+            bottom: _NavDock.height + 16 + MediaQuery.paddingOf(context).bottom,
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(AppTheme.radiusMd),
+              child: const MiniPlayerWidget(),
+            ),
           ),
 
-          // Floating Glassmorphic Bottom Navigation Dock
+          // Floating glass navigation dock
           Align(
             alignment: Alignment.bottomCenter,
-            child: Container(
-              margin: const EdgeInsets.fromLTRB(20, 0, 20, 20),
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(24),
-                child: BackdropFilter(
-                  filter: ImageFilter.blur(sigmaX: 12.0, sigmaY: 12.0),
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(vertical: 4),
-                    decoration: BoxDecoration(
-                      color: AppTheme.surface.withValues(alpha: 0.8),
-                      borderRadius: BorderRadius.circular(24),
-                      border: Border.all(
-                        color: Colors.white.withValues(alpha: 0.08),
-                        width: 1.0,
-                      ),
-                      boxShadow: [
-                        BoxShadow(
-                          color: Colors.black.withValues(alpha: 0.4),
-                          blurRadius: 16,
-                          offset: const Offset(0, 4),
-                        ),
-                      ],
-                    ),
-                    child: BottomNavigationBar(
-                      currentIndex: _currentIndex,
-                      onTap: (index) {
-                        setState(() {
-                          _currentIndex = index;
-                        });
-                      },
-                      type: BottomNavigationBarType.fixed,
-                      backgroundColor: Colors.transparent,
-                      elevation: 0,
-                      selectedItemColor: AppTheme.accent,
-                      unselectedItemColor: AppTheme.textSecondary,
-                      selectedLabelStyle: const TextStyle(fontWeight: FontWeight.bold, fontSize: 11),
-                      unselectedLabelStyle: const TextStyle(fontSize: 11),
-                      items: const [
-                        BottomNavigationBarItem(
-                          icon: Icon(Icons.home_outlined),
-                          activeIcon: Icon(Icons.home),
-                          label: 'Home',
-                        ),
-                        BottomNavigationBarItem(
-                          icon: Icon(Icons.search),
-                          activeIcon: Icon(Icons.search_rounded),
-                          label: 'Search',
-                        ),
-                        BottomNavigationBarItem(
-                          icon: Icon(Icons.bookmark_outline),
-                          activeIcon: Icon(Icons.bookmark),
-                          label: 'Watchlist',
-                        ),
-                        BottomNavigationBarItem(
-                          icon: Icon(Icons.person_outline),
-                          activeIcon: Icon(Icons.person),
-                          label: 'Profile',
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
+            child: AnimatedSlide(
+              offset: Offset(0, _dockVisible ? 0 : 1.6),
+              duration: const Duration(milliseconds: 220),
+              curve: Curves.easeOutCubic,
+              child: _NavDock(
+                currentIndex: _currentIndex,
+                onTap: _select,
               ),
             ),
           ),
@@ -174,6 +142,123 @@ class _MainNavigationShellState extends State<MainNavigationShell> {
           // Floating background download manager
           const FloatingDownloadWidget(),
         ],
+      ),
+    );
+  }
+}
+class _NavDestination {
+  final IconData icon;
+  final IconData activeIcon;
+  final String label;
+  const _NavDestination(this.icon, this.activeIcon, this.label);
+}
+
+/// Floating, blurred bottom navigation with an animated pill on the active tab.
+class _NavDock extends StatelessWidget {
+  static const double height = 64;
+
+  static const _destinations = [
+    _NavDestination(Icons.home_outlined, Icons.home_rounded, 'Home'),
+    _NavDestination(Icons.search_rounded, Icons.search_rounded, 'Search'),
+    _NavDestination(Icons.bookmark_outline_rounded, Icons.bookmark_rounded, 'Watchlist'),
+    _NavDestination(Icons.person_outline_rounded, Icons.person_rounded, 'Profile'),
+  ];
+
+  final int currentIndex;
+  final ValueChanged<int> onTap;
+
+  const _NavDock({required this.currentIndex, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final bottomInset = MediaQuery.paddingOf(context).bottom;
+    return Padding(
+      padding: EdgeInsets.fromLTRB(16, 0, 16, 12 + bottomInset),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(AppTheme.radiusLg + 4),
+        child: BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
+          child: Container(
+            height: height,
+            padding: const EdgeInsets.symmetric(horizontal: 6),
+            decoration: BoxDecoration(
+              color: AppTheme.surface.withValues(alpha: 0.82),
+              borderRadius: BorderRadius.circular(AppTheme.radiusLg + 4),
+              border: Border.all(color: AppTheme.stroke),
+            ),
+            child: Row(
+              children: [
+                for (var i = 0; i < _destinations.length; i++)
+                  Expanded(
+                    child: _NavDockItem(
+                      destination: _destinations[i],
+                      selected: i == currentIndex,
+                      onTap: () => onTap(i),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _NavDockItem extends StatelessWidget {
+  final _NavDestination destination;
+  final bool selected;
+  final VoidCallback onTap;
+
+  const _NavDockItem({
+    required this.destination,
+    required this.selected,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final color = selected ? AppTheme.accent : AppTheme.textSecondary;
+    return Semantics(
+      button: true,
+      selected: selected,
+      label: destination.label,
+      child: InkResponse(
+        onTap: onTap,
+        radius: 36,
+        highlightShape: BoxShape.rectangle,
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            AnimatedContainer(
+              duration: const Duration(milliseconds: 240),
+              curve: Curves.easeOutCubic,
+              width: selected ? 52 : 36,
+              height: 28,
+              decoration: BoxDecoration(
+                color: selected
+                    ? AppTheme.accent.withValues(alpha: 0.14)
+                    : Colors.transparent,
+                borderRadius: BorderRadius.circular(14),
+              ),
+              child: Icon(
+                selected ? destination.activeIcon : destination.icon,
+                color: color,
+                size: 22,
+              ),
+            ),
+            const SizedBox(height: 3),
+            AnimatedDefaultTextStyle(
+              duration: const Duration(milliseconds: 200),
+              style: TextStyle(
+                fontSize: 11,
+                fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+                color: color,
+              ),
+              child: Text(destination.label, maxLines: 1),
+            ),
+          ],
+        ),
       ),
     );
   }
