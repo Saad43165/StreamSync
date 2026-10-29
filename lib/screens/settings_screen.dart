@@ -101,8 +101,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        backgroundColor: AppTheme.surface,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         title: const Text('Clear TMDB Cache', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
         content: Text(
           'This will wipe out $_cacheSize of cached pages and offline lists, forcing the app to fetch real-time fresh API data.',
@@ -147,8 +145,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        backgroundColor: AppTheme.surface,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         title: const Text('Delete All Downloads', style: TextStyle(color: Colors.redAccent, fontWeight: FontWeight.bold)),
         content: Text(
           'This will permanently delete all $_downloadsSize of offline video files from your local device storage.',
@@ -261,9 +257,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                     children: dbService.profiles.map((profile) {
                       final isCurrent = dbService.currentProfile == profile;
-                      Color profileColor = Colors.purpleAccent;
-                      if (profile == 'Family') profileColor = Colors.blueAccent;
-                      if (profile == 'Kids') profileColor = Colors.greenAccent;
+                      final profileColor = AppTheme.profileColor(profile);
 
                       return GestureDetector(
                         onTap: () {
@@ -398,8 +392,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     final confirmed = await showDialog<bool>(
                       context: context,
                       builder: (ctx) => AlertDialog(
-                        backgroundColor: AppTheme.surface,
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
                         title: const Text('Reset Everything', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
                         content: const Text(
                           'This will delete your watchlist, history list, and stats for this profile permanently. Local downloads remain untouched.',

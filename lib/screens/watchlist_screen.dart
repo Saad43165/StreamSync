@@ -3,7 +3,8 @@ import 'package:provider/provider.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import '../services/database_service.dart';
 import '../theme/app_theme.dart';
-import '../widgets/shimmer_loading.dart';
+import '../main.dart';
+import '../widgets/ui_kit.dart';
 import 'details_screen.dart';
 
 class WatchlistScreen extends StatelessWidget {
@@ -16,65 +17,35 @@ class WatchlistScreen extends StatelessWidget {
 
     return Scaffold(
       backgroundColor: AppTheme.background,
-      appBar: AppBar(
-        title: const Text('My Watchlist',
-            style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white)),
-        backgroundColor: AppTheme.background,
-        elevation: 0,
-        actions: list.isNotEmpty
-            ? [
-          IconButton(
-            icon: const Icon(Icons.delete_sweep_outlined, color: Colors.redAccent),
-            tooltip: 'Clear all',
-            onPressed: () => _showClearAllDialog(context, dbService),
-          ),
-        ]
-            : null,
-      ),
-      body: list.isEmpty
-          ? _buildEmptyState(context)
-          : _buildWatchlistContent(context, list, dbService),
-    );
-  }
-
-  Widget _buildEmptyState(BuildContext context) {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(32),
+      body: SafeArea(
+        bottom: false,
         child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Container(
-              width: 80,
-              height: 80,
-              decoration: BoxDecoration(
-                color: AppTheme.accent.withValues(alpha: 0.1),
-                shape: BoxShape.circle,
-              ),
-              child: Icon(
-                Icons.bookmark_outline,
-                size: 40,
-                color: AppTheme.accent.withValues(alpha: 0.5),
-              ),
+            PageHeader(
+              title: 'Watchlist',
+              subtitle: list.isEmpty
+                  ? 'Save titles to watch later'
+                  : '${list.length} ${list.length == 1 ? 'title' : 'titles'} saved',
+              actions: [
+                if (list.isNotEmpty)
+                  IconButton(
+                    icon: const Icon(Icons.delete_sweep_outlined, color: AppTheme.textSecondary),
+                    tooltip: 'Clear all',
+                    onPressed: () => _showClearAllDialog(context, dbService),
+                  ),
+              ],
             ),
-            const SizedBox(height: 20),
-            const Text(
-              'Your watchlist is empty',
-              style: TextStyle(
-                color: Colors.white,
-                fontSize: 18,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-            const SizedBox(height: 8),
-            const Text(
-              'Add movies or TV series to track them!\nThey\'ll appear here for quick access.',
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                color: AppTheme.textSecondary,
-                fontSize: 13,
-                height: 1.5,
-              ),
+            Expanded(
+              child: list.isEmpty
+                  ? EmptyState(
+                      icon: Icons.bookmark_outline_rounded,
+                      title: 'Your watchlist is empty',
+                      message: 'Tap the bookmark on any movie or show and it will be waiting for you here.',
+                      actionLabel: 'Browse titles',
+                      onAction: () => MainNavigationShell.selectTab(context, 0),
+                    )
+                  : _buildWatchlistContent(context, list, dbService),
             ),
           ],
         ),
@@ -84,50 +55,29 @@ class WatchlistScreen extends StatelessWidget {
 
   Widget _buildWatchlistContent(
       BuildContext context, List<dynamic> list, DatabaseService dbService) {
-    return Column(
-      children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(20, 12, 20, 8),
-          child: Row(
-            children: [
-              Text(
-                '${list.length} ${list.length == 1 ? 'title' : 'titles'} saved',
-                style: const TextStyle(
-                  color: AppTheme.textSecondary,
-                  fontSize: 12,
-                  fontWeight: FontWeight.w500,
+    return ListView.builder(
+      padding: const EdgeInsets.fromLTRB(16, 4, 16, 110),
+      physics: const BouncingScrollPhysics(),
+      itemCount: list.length,
+      itemBuilder: (context, index) {
+        final item = list[index];
+        return _WatchlistCard(
+          item: item,
+          onTap: () {
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (context) => DetailsScreen(
+                  id: item['id'],
+                  mediaType: item['media_type'] ?? 'movie',
+                  heroTag: 'watchlist_poster_${item['id']}',
                 ),
               ),
-            ],
-          ),
-        ),
-        Expanded(
-          child: ListView.builder(
-            padding: const EdgeInsets.fromLTRB(16, 4, 16, 110),
-            physics: const BouncingScrollPhysics(),
-            itemCount: list.length,
-            itemBuilder: (context, index) {
-              final item = list[index];
-              return _WatchlistCard(
-                item: item,
-                onTap: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (context) => DetailsScreen(
-                        id: item['id'],
-                        mediaType: item['media_type'] ?? 'movie',
-                        heroTag: 'watchlist_poster_${item['id']}',
-                      ),
-                    ),
-                  );
-                },
-                onDelete: () => dbService.removeFromWatchlist(item['id'], mediaType: item['media_type']),
-              );
-            },
-          ),
-        ),
-      ],
+            );
+          },
+          onDelete: () => dbService.removeFromWatchlist(item['id'], mediaType: item['media_type']),
+        );
+      },
     );
   }
 
@@ -135,14 +85,8 @@ class WatchlistScreen extends StatelessWidget {
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
-        backgroundColor: AppTheme.surface,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: const Text('Clear Watchlist',
-            style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-        content: const Text(
-          'Remove all titles from your watchlist?',
-          style: TextStyle(color: AppTheme.textSecondary),
-        ),
+        title: const Text('Clear watchlist?'),
+        content: const Text('This removes every saved title. It can\'t be undone.'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx),
@@ -154,7 +98,7 @@ class WatchlistScreen extends StatelessWidget {
               Navigator.pop(ctx);
             },
             child: const Text('Clear All',
-                style: TextStyle(color: Colors.redAccent, fontWeight: FontWeight.bold)),
+                style: TextStyle(color: AppTheme.danger, fontWeight: FontWeight.bold)),
           ),
         ],
       ),
@@ -195,29 +139,30 @@ class _WatchlistCard extends StatelessWidget {
           alignment: Alignment.centerRight,
           padding: const EdgeInsets.only(right: 20),
           decoration: BoxDecoration(
-            color: Colors.redAccent.withValues(alpha: 0.2),
-            borderRadius: BorderRadius.circular(14),
+            color: AppTheme.danger.withValues(alpha: 0.16),
+            borderRadius: BorderRadius.circular(AppTheme.radiusMd),
           ),
-          child: const Icon(Icons.delete_outline, color: Colors.redAccent),
+          child: const Icon(Icons.delete_outline, color: AppTheme.danger),
         ),
         onDismissed: (_) => onDelete(),
-        child: GestureDetector(
-          onTap: onTap,
-          child: Container(
-            decoration: BoxDecoration(
-              color: AppTheme.surface,
-              borderRadius: BorderRadius.circular(14),
-              border: Border.all(color: Colors.white.withValues(alpha: 0.06)),
-            ),
+        child: Material(
+          color: AppTheme.card,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(AppTheme.radiusMd),
+            side: const BorderSide(color: AppTheme.divider),
+          ),
+          clipBehavior: Clip.antiAlias,
+          child: InkWell(
+            onTap: onTap,
             child: Padding(
-              padding: const EdgeInsets.all(12),
+              padding: const EdgeInsets.all(10),
               child: Row(
                 children: [
                   ClipRRect(
                     borderRadius: BorderRadius.circular(10),
                     child: SizedBox(
-                      width: 56,
-                      height: 84,
+                      width: 64,
+                      height: 96,
                       child: imageUrl != null
                           ? Hero(
                         tag: 'watchlist_poster_${item['id']}',
@@ -237,7 +182,7 @@ class _WatchlistCard extends StatelessWidget {
                             color: Colors.white12,
                             child: Icon(Icons.movie, color: Colors.white.withValues(alpha: 0.3)),
                           ),
-                          memCacheWidth: 112,
+                          memCacheWidth: 128,
                         ),
                       )
                           : Container(
@@ -252,27 +197,33 @@ class _WatchlistCard extends StatelessWidget {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(title, maxLines: 2, overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white, fontSize: 14, height: 1.3)),
+                            style: const TextStyle(fontWeight: FontWeight.w600, color: AppTheme.textPrimary, fontSize: 15, height: 1.3)),
                         const SizedBox(height: 6),
                         Wrap(
                           spacing: 8, runSpacing: 4,
                           children: [
-                            _Badge(text: mediaType.toUpperCase(), color: mediaType == 'tv' ? Colors.blueAccent : Colors.purpleAccent),
-                            if (ratingNum > 0) _Badge(text: '⭐ $rating', color: const Color(0xFFF5C842)),
+                            MetaBadge(
+                                text: mediaType == 'tv' ? 'SERIES' : 'FILM',
+                                color: mediaType == 'tv' ? AppTheme.accent : AppTheme.secondaryAccent),
+                            if (ratingNum > 0)
+                              MetaBadge(text: rating, icon: Icons.star_rounded, color: AppTheme.gold),
                             if (mediaType == 'tv' && season != null)
-                              _Badge(text: 'S$season${episode != null ? 'E$episode' : ''}', color: Colors.tealAccent),
+                              MetaBadge(
+                                  text: 'S$season${episode != null ? 'E$episode' : ''}',
+                                  color: AppTheme.textSecondary),
                           ],
                         ),
                         if (overview.isNotEmpty) ...[
                           const SizedBox(height: 6),
                           Text(overview, maxLines: 2, overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(color: AppTheme.textSecondary, fontSize: 11, height: 1.4)),
+                              style: const TextStyle(color: AppTheme.textSecondary, fontSize: 12, height: 1.4)),
                         ],
                       ],
                     ),
                   ),
                   IconButton(
-                    icon: const Icon(Icons.close_rounded, color: Colors.white38, size: 18),
+                    icon: const Icon(Icons.close_rounded, color: AppTheme.textMuted, size: 18),
+                    tooltip: 'Remove',
                     onPressed: onDelete,
                     visualDensity: VisualDensity.compact,
                     padding: EdgeInsets.zero,
@@ -294,24 +245,5 @@ class _WatchlistCard extends StatelessWidget {
     if (path.startsWith('http')) return path;
     if (path.startsWith('/')) return 'https://image.tmdb.org/t/p/w200$path';
     return null;
-  }
-}
-
-class _Badge extends StatelessWidget {
-  final String text;
-  final Color color;
-  const _Badge({required this.text, required this.color});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.12),
-        borderRadius: BorderRadius.circular(5),
-        border: Border.all(color: color.withValues(alpha: 0.3)),
-      ),
-      child: Text(text, style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: color, letterSpacing: 0.3)),
-    );
   }
 }

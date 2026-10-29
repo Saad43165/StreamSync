@@ -1,7 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 import 'dart:ui';
-import 'package:flutter/foundation.dart' show listEquals;
+import 'package:flutter/foundation.dart' show kIsWeb, listEquals;
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:provider/provider.dart';
@@ -12,6 +12,7 @@ import 'filtered_results_screen.dart';
 import '../theme/app_theme.dart';
 import '../widgets/glass_card.dart';
 import '../widgets/shimmer_loading.dart';
+import '../widgets/ui_kit.dart';
 import 'details_screen.dart';
 import 'native_stream_player_screen.dart';
 import 'see_all_screen.dart';
@@ -20,16 +21,17 @@ import 'watch_history_screen.dart';
 import 'settings_screen.dart';
 import 'downloads_screen.dart';
 import 'search_screen.dart';
+import '../main.dart';
 
 // ── Pre-computed static colors (avoids withOpacity() allocations every frame) ─
-const Color _bg       = Color(0xFF080810);
-const Color _surface  = Color(0xFF0F0F1E);
-const Color _card     = Color(0xFF14142A);
-const Color _dimText  = Color(0xFF8888AA);
-const Color _gold     = Color(0xFFF5C842);
+const Color _bg       = AppTheme.background;
+const Color _surface  = AppTheme.surface;
+const Color _card     = AppTheme.card;
+const Color _dimText  = AppTheme.textSecondary;
+const Color _gold     = AppTheme.gold;
 
 // Replaces withOpacity calls — computed once at compile time
-const Color _bgBlur72       = Color(0xB8080810); // _bg @ 0.72
+const Color _bgBlur72       = Color(0xB807070D); // _bg @ 0.72
 const Color _white12        = Color(0x1FFFFFFF);
 const Color _white14        = Color(0x24FFFFFF);
 const Color _white15        = Color(0x26FFFFFF);
@@ -161,6 +163,8 @@ class _HomeScreenState extends State<HomeScreen>
   }
 
   Future<void> _checkConnection() async {
+    // DNS lookups aren't available in the browser; rely on fetch errors there.
+    if (kIsWeb) return;
     try {
       final result = await InternetAddress.lookup('api.themoviedb.org')
           .timeout(const Duration(seconds: 4));
@@ -201,6 +205,8 @@ class _HomeScreenState extends State<HomeScreen>
       backgroundColor: _bg,
       extendBodyBehindAppBar: true,
       drawer: _buildDrawer(context),
+      onDrawerChanged: (open) =>
+          MainNavigationShell.setDockVisible(context, !open),
 
       // FIX 4: ValueListenableBuilder — appbar animates without setState
       appBar: PreferredSize(
@@ -268,6 +274,7 @@ class _HomeScreenState extends State<HomeScreen>
         ),
         builder: (context, snap, __) {
           final carousel = snap.trending.take(6).toList();
+          final rows = _contentRows(context, snap);
           return RefreshIndicator(
             color: AppTheme.accent,
             backgroundColor: _surface,
@@ -320,6 +327,15 @@ class _HomeScreenState extends State<HomeScreen>
                 //        isolated so it doesn't cause full-page rebuilds
                 const SliverToBoxAdapter(child: _ContinueWatchingSection()),
 
+                // Quick jump pills sit right under the hero so they work as
+                // in-page navigation; browse filters follow the first rows.
+                SliverToBoxAdapter(
+                    child: _cachedJumpPills ??=
+                        _buildJumpPills(context)),
+
+                // ── Content rows ─────────────────────────────────────────
+                ...rows.take(2),
+
                 // FIX 7: Static strips cached as fields — built only once
                 SliverToBoxAdapter(
                     child: _cachedGenreStrip ??=
@@ -327,12 +343,8 @@ class _HomeScreenState extends State<HomeScreen>
                 SliverToBoxAdapter(
                     child: _cachedYearStrip ??=
                         _buildYearStrip(context)),
-                SliverToBoxAdapter(
-                    child: _cachedJumpPills ??=
-                        _buildJumpPills(context)),
 
-                // ── Content rows ─────────────────────────────────────────
-                ..._contentRows(context, snap),
+                ...rows.skip(2),
 
                 const SliverToBoxAdapter(child: SizedBox(height: 110)),
               ],
@@ -349,14 +361,14 @@ class _HomeScreenState extends State<HomeScreen>
   Widget _buildOfflineStrip() {
     return Container(
       margin: const EdgeInsets.fromLTRB(16, 12, 16, 0),
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       decoration: BoxDecoration(
-        color: const Color(0xB2B71C1C), // red.900 @ 0.7
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: const Color(0x66FF5252)),
+        color: AppTheme.danger.withValues(alpha: 0.10),
+        borderRadius: BorderRadius.circular(AppTheme.radiusMd),
+        border: Border.all(color: AppTheme.danger.withValues(alpha: 0.25)),
       ),
       child: const Row(children: [
-        Icon(Icons.wifi_off_rounded, color: Colors.redAccent, size: 16),
+        Icon(Icons.wifi_off_rounded, color: AppTheme.danger, size: 16),
         SizedBox(width: 10),
         Expanded(
           child: Text(
@@ -385,15 +397,7 @@ class _HomeScreenState extends State<HomeScreen>
 
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       const SizedBox(height: 28),
-      const Padding(
-        padding: EdgeInsets.only(left: 20, bottom: 12),
-        child: Text('GENRES',
-            style: TextStyle(
-                fontSize: 12,
-                fontWeight: FontWeight.bold,
-                color: _dimText,
-                letterSpacing: 1.4)),
-      ),
+      SectionLabel('Genres', padding: const EdgeInsets.fromLTRB(20, 0, 20, 10)),
       SizedBox(
         height: 44,
         child: ListView.builder(
@@ -418,15 +422,7 @@ class _HomeScreenState extends State<HomeScreen>
     const years = ['2025', '2024', '2023', '2022', '2020s', '2010s', '2000s'];
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       const SizedBox(height: 20),
-      const Padding(
-        padding: EdgeInsets.only(left: 20, bottom: 10),
-        child: Text('BY YEAR',
-            style: TextStyle(
-                fontSize: 12,
-                fontWeight: FontWeight.bold,
-                color: _dimText,
-                letterSpacing: 1.4)),
-      ),
+      SectionLabel('By year', padding: const EdgeInsets.fromLTRB(20, 0, 20, 10)),
       SizedBox(
         height: 36,
         child: ListView.builder(
@@ -449,29 +445,20 @@ class _HomeScreenState extends State<HomeScreen>
       _Pill('Movies',    _moviesKey,    Icons.movie_rounded,                AppTheme.accent),
       _Pill('TV Shows',  _seriesKey,    Icons.tv_rounded,                   AppTheme.accent),
       _Pill('Upcoming',  _upcomingKey,  Icons.event_note_rounded,           _gold),
-      _Pill('Netflix',   _netflixKey,   Icons.play_circle_fill_rounded,     Colors.redAccent),
-      _Pill('Prime',     _primeKey,     Icons.star_rounded,                 Colors.lightBlueAccent),
-      _Pill('Disney+',   _disneyKey,    Icons.auto_awesome_rounded,         Colors.blueAccent),
+      _Pill('Netflix',   _netflixKey,   Icons.play_circle_fill_rounded,     AppTheme.accent),
+      _Pill('Prime',     _primeKey,     Icons.star_rounded,                 AppTheme.accent),
+      _Pill('Disney+',   _disneyKey,    Icons.auto_awesome_rounded,         AppTheme.accent),
       _Pill('Action',    _actionKey,    Icons.sports_martial_arts_rounded,  AppTheme.accent),
       _Pill('Comedy',    _comedyKey,    Icons.emoji_emotions_rounded,       AppTheme.accent),
       _Pill('Sci-Fi',    _scifiKey,     Icons.rocket_launch_rounded,        AppTheme.accent),
       _Pill('Horror',    _horrorKey,    Icons.dangerous_rounded,            AppTheme.accent),
-      _Pill('Bollywood', _bollywoodKey, Icons.music_note_rounded,           Colors.deepOrangeAccent),
-      _Pill('Pakistani', _pakistaniKey, Icons.language_rounded,             Colors.greenAccent),
-      _Pill('Free',      _freeKey,      Icons.card_giftcard_rounded,        Colors.greenAccent),
+      _Pill('Bollywood', _bollywoodKey, Icons.music_note_rounded,           AppTheme.accent),
+      _Pill('Pakistani', _pakistaniKey, Icons.language_rounded,             AppTheme.accent),
+      _Pill('Free',      _freeKey,      Icons.card_giftcard_rounded,        AppTheme.success),
     ];
 
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      const SizedBox(height: 24),
-      const Padding(
-        padding: EdgeInsets.only(left: 20, bottom: 10),
-        child: Text('JUMP TO',
-            style: TextStyle(
-                fontSize: 12,
-                fontWeight: FontWeight.bold,
-                color: _dimText,
-                letterSpacing: 1.4)),
-      ),
+      const SizedBox(height: 16),
       SizedBox(
         height: 38,
         child: ListView.builder(
@@ -592,9 +579,7 @@ class _HomeScreenState extends State<HomeScreen>
             builder: (context, db, _) {
               final username   = db.currentProfile;
               const sub        = 'Local profile';
-              Color profileColor = AppTheme.accent;
-              if (db.currentProfile == 'Family') profileColor = Colors.blueAccent;
-              if (db.currentProfile == 'Kids')   profileColor = Colors.greenAccent;
+              final profileColor = AppTheme.profileColor(username);
               return _DrawerProfileCard(
                 username: username,
                 sub: sub,
@@ -1399,29 +1384,31 @@ class _ContentRow extends StatelessWidget {
     if (!isLoading && items.isEmpty && !hasError) return const SizedBox.shrink();
 
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      const SizedBox(height: 32),
+      const SizedBox(height: 28),
       _SectionHeader(
         key: sectionKey,
         title: title,
         accentColor: accentColor,
         platformLogoUrl: platformLogoUrl,
         trailing: items.isNotEmpty
-            ? GestureDetector(
-          onTap: onSeeAll,
-          child: Row(children: [
+            ? TextButton(
+          onPressed: onSeeAll,
+          style: TextButton.styleFrom(
+            foregroundColor: AppTheme.textSecondary,
+            padding: const EdgeInsets.symmetric(horizontal: 8),
+            minimumSize: const Size(0, 36),
+            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+          ),
+          child: const Row(mainAxisSize: MainAxisSize.min, children: [
             Text('See all',
-                style: TextStyle(
-                    color: accentColor ?? AppTheme.accent,
-                    fontSize: 12,
-                    fontWeight: FontWeight.bold)),
-            const SizedBox(width: 3),
-            Icon(Icons.arrow_forward_ios_rounded,
-                color: accentColor ?? AppTheme.accent, size: 10),
+                style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+            SizedBox(width: 2),
+            Icon(Icons.chevron_right_rounded, size: 18),
           ]),
         )
             : null,
       ),
-      const SizedBox(height: 14),
+      const SizedBox(height: 10),
       if (isLoading)
         ShimmerLoadingPresets.horizontalPostersSkeleton()
       else if (hasError && items.isEmpty)
@@ -1430,12 +1417,12 @@ class _ContentRow extends StatelessWidget {
           margin: const EdgeInsets.symmetric(horizontal: 16),
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
           decoration: BoxDecoration(
-            color: const Color(0x1AFF5252),
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: const Color(0x33FF5252)),
+            color: AppTheme.danger.withValues(alpha: 0.08),
+            borderRadius: BorderRadius.circular(AppTheme.radiusMd),
+            border: Border.all(color: AppTheme.danger.withValues(alpha: 0.2)),
           ),
           child: Row(children: [
-            const Icon(Icons.wifi_off_rounded, color: Colors.redAccent, size: 16),
+            const Icon(Icons.wifi_off_rounded, color: AppTheme.danger, size: 16),
             const SizedBox(width: 10),
             const Expanded(
               child: Text("Couldn't load this section.",
@@ -2083,7 +2070,7 @@ class _SectionHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 20),
+      padding: const EdgeInsets.fromLTRB(20, 0, 12, 0),
       child: Row(children: [
         if (platformLogoUrl != null) ...[
           ClipRRect(
@@ -2098,21 +2085,15 @@ class _SectionHeader extends StatelessWidget {
           ),
           const SizedBox(width: 8),
         ],
-        Container(
-          width: 3, height: 17,
-          decoration: BoxDecoration(
-            color: accentColor ?? AppTheme.accent,
-            borderRadius: BorderRadius.circular(2),
-          ),
-        ),
-        const SizedBox(width: 10),
         Expanded(
           child: Text(title,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
               style: const TextStyle(
-                  fontSize: 17,
-                  fontWeight: FontWeight.w800,
-                  color: Colors.white,
-                  letterSpacing: -0.2)),
+                  fontSize: 19,
+                  fontWeight: FontWeight.w700,
+                  color: AppTheme.textPrimary,
+                  letterSpacing: -0.3)),
         ),
         if (trailing != null) trailing!,
       ]),

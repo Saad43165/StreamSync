@@ -226,10 +226,10 @@ class _SearchScreenState extends State<SearchScreen>
       child: Row(children: [
         Expanded(
           child: Container(
-            height: 46,
+            height: 48,
             decoration: BoxDecoration(
-              color: const Color(0xFF1C1C2E),
-              borderRadius: BorderRadius.circular(12),
+              color: AppTheme.surfaceRaised,
+              borderRadius: BorderRadius.circular(AppTheme.radiusMd),
               border: Border.all(
                 color: _searchFocusNode.hasFocus
                     ? AppTheme.accent
@@ -372,12 +372,12 @@ class _SearchScreenState extends State<SearchScreen>
 
   Widget _buildBrowseHeader() {
     return const Padding(
-      padding: EdgeInsets.fromLTRB(16, 4, 16, 12),
-      child: Text('Browse by Genre',
+      padding: EdgeInsets.fromLTRB(20, 8, 16, 12),
+      child: Text('Browse by genre',
           style: TextStyle(
-              color: Colors.white,
-              fontSize: 20,
-              fontWeight: FontWeight.bold,
+              color: AppTheme.textPrimary,
+              fontSize: 19,
+              fontWeight: FontWeight.w700,
               letterSpacing: -0.3)),
     );
   }
@@ -387,40 +387,52 @@ class _SearchScreenState extends State<SearchScreen>
       delegate: SliverChildBuilderDelegate(
         (_, i) {
           final genre = _genres[i];
-          return GestureDetector(
-            onTap: () => _onGenreTap(genre),
-            child: Container(
-              decoration: BoxDecoration(
-                color: genre.color,
-                borderRadius: BorderRadius.circular(10),
-                gradient: LinearGradient(
-                  colors: [
-                    genre.color,
-                    genre.color.withValues(alpha: 0.6),
-                  ],
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                ),
-              ),
-              child: Stack(children: [
-                Positioned(
-                  right: -8, bottom: -8,
-                  child: Icon(
-                    _genreIcon(genre.label),
-                    size: 64,
-                    color: Colors.white.withValues(alpha: 0.15),
+          return Material(
+            color: AppTheme.card,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(AppTheme.radiusMd),
+              side: BorderSide(color: genre.color.withValues(alpha: 0.28)),
+            ),
+            clipBehavior: Clip.antiAlias,
+            child: InkWell(
+              onTap: () => _onGenreTap(genre),
+              child: Ink(
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    colors: [
+                      genre.color.withValues(alpha: 0.30),
+                      genre.color.withValues(alpha: 0.06),
+                    ],
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
                   ),
                 ),
-                Padding(
-                  padding: const EdgeInsets.all(12),
-                  child: Text(genre.label,
-                      style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 14,
-                          fontWeight: FontWeight.bold,
-                          letterSpacing: -0.2)),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                  child: Row(children: [
+                    Container(
+                      width: 34,
+                      height: 34,
+                      decoration: BoxDecoration(
+                        color: genre.color.withValues(alpha: 0.28),
+                        borderRadius: BorderRadius.circular(AppTheme.radiusSm),
+                      ),
+                      child: Icon(_genreIcon(genre.label),
+                          size: 19, color: Colors.white),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Text(genre.label,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                              color: AppTheme.textPrimary,
+                              fontSize: 15,
+                              fontWeight: FontWeight.w600)),
+                    ),
+                  ]),
                 ),
-              ]),
+              ),
             ),
           );
         },
@@ -428,9 +440,9 @@ class _SearchScreenState extends State<SearchScreen>
       ),
       gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
         crossAxisCount: 2,
-        childAspectRatio: 2.8,
-        crossAxisSpacing: 8,
-        mainAxisSpacing: 8,
+        childAspectRatio: 2.7,
+        crossAxisSpacing: 10,
+        mainAxisSpacing: 10,
       ),
     );
   }

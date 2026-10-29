@@ -706,15 +706,11 @@ class _DetailsScreenState extends State<DetailsScreen> with TickerProviderStateM
               child: Ink(
                 height: 58,
                 decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(16),
-                  gradient: const LinearGradient(
-                    colors: [Color(0xFF6C63FF), Color(0xFF8B5CF6)],
-                    begin: Alignment.centerLeft,
-                    end: Alignment.centerRight,
-                  ),
+                  borderRadius: BorderRadius.circular(AppTheme.radiusMd),
+                  gradient: AppTheme.ctaGradient,
                   boxShadow: [
                     BoxShadow(
-                      color: const Color(0xFF6C63FF).withValues(alpha: 0.35),
+                      color: AppTheme.secondaryAccent.withValues(alpha: 0.30),
                       blurRadius: 18,
                       offset: const Offset(0, 8),
                     ),
@@ -1694,8 +1690,7 @@ class _WatchlistButton extends StatelessWidget {
               db.addToWatchlist(details);
               ScaffoldMessenger.of(context).showSnackBar(
                   const SnackBar(
-                    content: Text('❤️ Added to watchlist'),
-                    backgroundColor: Color(0xFF6C63FF),
+                    content: Text('Added to watchlist'),
                     duration: Duration(seconds: 1),
                     behavior: SnackBarBehavior.floating,
                   ));
@@ -1707,12 +1702,12 @@ class _WatchlistButton extends StatelessWidget {
             padding: const EdgeInsets.symmetric(vertical: 13),
             decoration: BoxDecoration(
               color: inWatchlist
-                  ? const Color(0xFF6C63FF).withValues(alpha: 0.18)
+                  ? AppTheme.secondaryAccent.withValues(alpha: 0.18)
                   : Colors.white.withValues(alpha: 0.05),
-              borderRadius: BorderRadius.circular(14),
+              borderRadius: BorderRadius.circular(AppTheme.radiusMd),
               border: Border.all(
                   color: inWatchlist
-                      ? const Color(0xFF6C63FF)
+                      ? AppTheme.secondaryAccent
                       : Colors.white24),
             ),
             child: Row(
@@ -1720,10 +1715,10 @@ class _WatchlistButton extends StatelessWidget {
               children: [
                 Icon(
                     inWatchlist
-                        ? Icons.favorite_rounded
-                        : Icons.favorite_border_rounded,
+                        ? Icons.bookmark_rounded
+                        : Icons.bookmark_add_outlined,
                     color: inWatchlist
-                        ? const Color(0xFF6C63FF)
+                        ? AppTheme.secondaryAccent
                         : Colors.white70,
                     size: 19),
                 const SizedBox(width: 8),
@@ -1731,7 +1726,7 @@ class _WatchlistButton extends StatelessWidget {
                     inWatchlist ? 'In watchlist' : 'Add to watchlist',
                     style: TextStyle(
                         color: inWatchlist
-                            ? const Color(0xFF6C63FF)
+                            ? AppTheme.secondaryAccent
                             : Colors.white70,
                         fontWeight: FontWeight.bold,
                         fontSize: 13.5)),
