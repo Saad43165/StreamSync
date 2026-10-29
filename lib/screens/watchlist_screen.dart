@@ -7,13 +7,50 @@ import '../main.dart';
 import '../widgets/ui_kit.dart';
 import 'details_screen.dart';
 
-class WatchlistScreen extends StatelessWidget {
+enum _WatchlistSort { recent, title, rating }
+
+class WatchlistScreen extends StatefulWidget {
   const WatchlistScreen({super.key});
+
+  @override
+  State<WatchlistScreen> createState() => _WatchlistScreenState();
+}
+
+class _WatchlistScreenState extends State<WatchlistScreen> {
+  String? _type; // null = all, 'movie', 'tv'
+  _WatchlistSort _sort = _WatchlistSort.recent;
+
+  static double _ratingOf(dynamic item) =>
+      (item['rating'] as num?)?.toDouble() ??
+      (item['vote_average'] as num?)?.toDouble() ??
+      0.0;
+
+  List<dynamic> _visible(List<dynamic> list) {
+    final items = list
+        .where((x) => _type == null || (x['media_type'] ?? 'movie') == _type)
+        .toList();
+    switch (_sort) {
+      case _WatchlistSort.recent:
+        // Stored oldest-first; newest saves belong on top.
+        return items.reversed.toList();
+      case _WatchlistSort.title:
+        items.sort((a, b) => (a['title'] ?? '')
+            .toString()
+            .toLowerCase()
+            .compareTo((b['title'] ?? '').toString().toLowerCase()));
+        return items;
+      case _WatchlistSort.rating:
+        items.sort((a, b) => _ratingOf(b).compareTo(_ratingOf(a)));
+        return items;
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     final dbService = Provider.of<DatabaseService>(context);
     final list = dbService.watchlist;
+    final movieCount = list.where((x) => (x['media_type'] ?? 'movie') == 'movie').length;
+    final tvCount = list.length - movieCount;
 
     return Scaffold(
       backgroundColor: AppTheme.background,
@@ -28,14 +65,52 @@ class WatchlistScreen extends StatelessWidget {
                   ? 'Save titles to watch later'
                   : '${list.length} ${list.length == 1 ? 'title' : 'titles'} saved',
               actions: [
-                if (list.isNotEmpty)
+                if (list.isNotEmpty) ...[
+                  PopupMenuButton<_WatchlistSort>(
+                    tooltip: 'Sort',
+                    icon: const Icon(Icons.sort_rounded, color: AppTheme.textSecondary),
+                    initialValue: _sort,
+                    onSelected: (v) => setState(() => _sort = v),
+                    itemBuilder: (_) => const [
+                      PopupMenuItem(value: _WatchlistSort.recent, child: Text('Recently added')),
+                      PopupMenuItem(value: _WatchlistSort.title, child: Text('Title A–Z')),
+                      PopupMenuItem(value: _WatchlistSort.rating, child: Text('Highest rated')),
+                    ],
+                  ),
                   IconButton(
                     icon: const Icon(Icons.delete_sweep_outlined, color: AppTheme.textSecondary),
                     tooltip: 'Clear all',
                     onPressed: () => _showClearAllDialog(context, dbService),
                   ),
+                ],
               ],
             ),
+            if (list.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
+                child: Row(children: [
+                  _FilterChip(
+                    label: 'All',
+                    count: list.length,
+                    selected: _type == null,
+                    onTap: () => setState(() => _type = null),
+                  ),
+                  const SizedBox(width: 8),
+                  _FilterChip(
+                    label: 'Movies',
+                    count: movieCount,
+                    selected: _type == 'movie',
+                    onTap: () => setState(() => _type = 'movie'),
+                  ),
+                  const SizedBox(width: 8),
+                  _FilterChip(
+                    label: 'Series',
+                    count: tvCount,
+                    selected: _type == 'tv',
+                    onTap: () => setState(() => _type = 'tv'),
+                  ),
+                ]),
+              ),
             Expanded(
               child: list.isEmpty
                   ? EmptyState(
@@ -45,7 +120,7 @@ class WatchlistScreen extends StatelessWidget {
                       actionLabel: 'Browse titles',
                       onAction: () => MainNavigationShell.selectTab(context, 0),
                     )
-                  : _buildWatchlistContent(context, list, dbService),
+                  : _buildWatchlistContent(context, _visible(list), dbService),
             ),
           ],
         ),
@@ -53,8 +128,29 @@ class WatchlistScreen extends StatelessWidget {
     );
   }
 
+  void _remove(BuildContext context, DatabaseService db, Map<String, dynamic> item) {
+    db.removeFromWatchlist(item['id'], mediaType: item['media_type']);
+    final messenger = ScaffoldMessenger.of(context);
+    messenger.hideCurrentSnackBar();
+    messenger.showSnackBar(SnackBar(
+      content: Text('Removed "${item['title'] ?? 'title'}"'),
+      action: SnackBarAction(
+        label: 'Undo',
+        // Stored entries keep the score under 'rating'; addToWatchlist reads 'vote_average'.
+        onPressed: () => db.addToWatchlist({...item, 'vote_average': item['rating']}),
+      ),
+    ));
+  }
+
   Widget _buildWatchlistContent(
       BuildContext context, List<dynamic> list, DatabaseService dbService) {
+    if (list.isEmpty) {
+      return EmptyState(
+        icon: _type == 'tv' ? Icons.tv_rounded : Icons.movie_outlined,
+        title: _type == 'tv' ? 'No series saved' : 'No movies saved',
+        message: 'Switch to All to see everything on your watchlist.',
+      );
+    }
     return ListView.builder(
       padding: const EdgeInsets.fromLTRB(16, 4, 16, 110),
       physics: const BouncingScrollPhysics(),
@@ -75,7 +171,7 @@ class WatchlistScreen extends StatelessWidget {
               ),
             );
           },
-          onDelete: () => dbService.removeFromWatchlist(item['id'], mediaType: item['media_type']),
+          onDelete: () => _remove(context, dbService, item),
         );
       },
     );
@@ -129,11 +225,13 @@ class _WatchlistCard extends StatelessWidget {
     final season = item['season'];
     final episode = item['episode'];
     final imageUrl = _buildImageUrl(posterPath);
+    final date = (item['release_date'] ?? '').toString();
+    final year = date.length >= 4 && date != 'N/A' ? date.substring(0, 4) : '';
 
     return Padding(
       padding: const EdgeInsets.only(bottom: 10),
       child: Dismissible(
-        key: Key('watchlist_${item['id']}'),
+        key: Key('watchlist_${item['media_type']}_${item['id']}'),
         direction: DismissDirection.endToStart,
         background: Container(
           alignment: Alignment.centerRight,
@@ -207,6 +305,8 @@ class _WatchlistCard extends StatelessWidget {
                                 color: mediaType == 'tv' ? AppTheme.accent : AppTheme.secondaryAccent),
                             if (ratingNum > 0)
                               MetaBadge(text: rating, icon: Icons.star_rounded, color: AppTheme.gold),
+                            if (year.isNotEmpty)
+                              MetaBadge(text: year, color: AppTheme.textSecondary),
                             if (mediaType == 'tv' && season != null)
                               MetaBadge(
                                   text: 'S$season${episode != null ? 'E$episode' : ''}',
@@ -245,5 +345,43 @@ class _WatchlistCard extends StatelessWidget {
     if (path.startsWith('http')) return path;
     if (path.startsWith('/')) return 'https://image.tmdb.org/t/p/w200$path';
     return null;
+  }
+}
+
+class _FilterChip extends StatelessWidget {
+  final String label;
+  final int count;
+  final bool selected;
+  final VoidCallback onTap;
+
+  const _FilterChip({
+    required this.label,
+    required this.count,
+    required this.selected,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 180),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+        decoration: BoxDecoration(
+          color: selected ? AppTheme.accent : Colors.white.withValues(alpha: 0.06),
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: selected ? AppTheme.accent : AppTheme.stroke),
+        ),
+        child: Text(
+          '$label  $count',
+          style: TextStyle(
+            color: selected ? AppTheme.background : AppTheme.textPrimary,
+            fontSize: 13,
+            fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+          ),
+        ),
+      ),
+    );
   }
 }
