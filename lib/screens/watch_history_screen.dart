@@ -3,7 +3,6 @@ import 'package:provider/provider.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import '../services/database_service.dart';
 import '../theme/app_theme.dart';
-import '../screens/login_screen.dart';
 import '../screens/details_screen.dart';
 
 class WatchHistoryScreen extends StatelessWidget {
@@ -79,24 +78,6 @@ class WatchHistoryScreen extends StatelessWidget {
                     textAlign: TextAlign.center,
                   ),
                   const SizedBox(height: 24),
-                  if (!dbService.isLoggedIn) ...[
-                    const Text(
-                      'Sign in to sync history across devices',
-                      style: TextStyle(color: AppTheme.textSecondary, fontSize: 11),
-                    ),
-                    const SizedBox(height: 12),
-                    ElevatedButton(
-                      onPressed: () => Navigator.push(
-                        context,
-                        MaterialPageRoute(builder: (_) => const LoginScreen(showSkipButton: false)),
-                      ),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: AppTheme.accent,
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                      ),
-                      child: const Text('Sign In', style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
-                    ),
-                  ],
                 ],
               ),
             )
@@ -113,19 +94,17 @@ class WatchHistoryScreen extends StatelessWidget {
                   ),
                   child: Row(
                     children: [
-                      Icon(
-                        dbService.isLoggedIn ? Icons.cloud_done_rounded : Icons.phone_android_rounded,
-                        color: dbService.isLoggedIn ? Colors.greenAccent : AppTheme.textSecondary,
+                      const Icon(
+                        Icons.phone_android_rounded,
+                        color: AppTheme.textSecondary,
                         size: 18,
                       ),
                       const SizedBox(width: 10),
                       Expanded(
                         child: Text(
-                          dbService.isLoggedIn
-                              ? 'Synced to account: @${dbService.username}  •  ${history.length} titles watched'
-                              : 'Saved locally for profile: ${dbService.currentProfile}  •  ${history.length} titles',
-                          style: TextStyle(
-                            color: dbService.isLoggedIn ? Colors.greenAccent.withAlpha(200) : AppTheme.textSecondary,
+                          'Saved locally for profile: ${dbService.currentProfile}  •  ${history.length} titles',
+                          style: const TextStyle(
+                            color: AppTheme.textSecondary,
                             fontSize: 11,
                           ),
                         ),

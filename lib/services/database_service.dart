@@ -16,9 +16,6 @@ class DatabaseService extends ChangeNotifier {
   String _selectedCountry = 'US';
   String get selectedCountry => _selectedCountry;
 
-  bool _isPremium = false;
-  bool get isPremium => _isPremium;
-
   bool _notifNewRelease = true;
   bool get notifNewRelease => _notifNewRelease;
 
@@ -55,42 +52,52 @@ class DatabaseService extends ChangeNotifier {
   /// Retrieve the cached real video URL for a given tmdbId (null if not yet captured)
   String? getInterceptedUrl(int tmdbId) => _interceptedUrls[tmdbId];
 
-  // Multi-Profile & Auth system
+  // Multi-Profile system (all data is local to the device)
   String _currentProfile = 'Enthusiast';
   String get currentProfile => _currentProfile;
 
   final List<String> _profiles = ['Enthusiast', 'Family', 'Kids'];
   List<String> get profiles => List.unmodifiable(_profiles);
 
-  bool _isLoggedIn = false;
-  bool get isLoggedIn => _isLoggedIn;
-
-  String _username = '';
-  String get username => _username;
-
-  String _email = '';
-  String get email => _email;
-
   // NEW: Loading state
   bool _isLoading = true;
   bool get isLoading => _isLoading;
 
-  // NEW: Cache for isInWatchlist/isDownloaded checks
-  final Set<int> _watchlistIds = {};
-  final Set<int> _downloadIds = {};
+  // Cache for isInWatchlist/isDownloaded checks. TMDB movie and TV ids are
+  // separate namespaces, so entries are keyed as "<media_type>:<id>".
+  final Set<String> _watchlistKeys = {};
+  final Set<String> _downloadKeys = {};
+
+  static String mediaKey(int id, String? mediaType) => '${mediaType ?? 'movie'}:$id';
+  static String _itemKey(Map item) =>
+      mediaKey(item['id'] as int, item['media_type'] as String?);
+
+  /// True when [item] is [id], and also [mediaType] when one is given.
+  static bool _matches(Map item, int id, String? mediaType) =>
+      item['id'] == id &&
+      (mediaType == null || (item['media_type'] ?? 'movie') == mediaType);
+
+  static bool _hasKey(Set<String> keys, int id, String? mediaType) =>
+      mediaType != null
+          ? keys.contains(mediaKey(id, mediaType))
+          : keys.contains(mediaKey(id, 'movie')) || keys.contains(mediaKey(id, 'tv'));
 
   // ── Local ratings (Feature 6) ─────────────────────────────────────────────
-  final Map<int, int> _ratings = {}; // tmdbId → 1-5 stars
-  int? getRating(int tmdbId) => _ratings[tmdbId];
+  // Keyed by mediaKey(); bare "<id>" keys are read as a fallback for ratings
+  // saved before media types were tracked.
+  final Map<String, int> _ratings = {};
+  int? getRating(int tmdbId, {String? mediaType}) =>
+      _ratings[mediaKey(tmdbId, mediaType)] ?? _ratings['$tmdbId'];
 
-  Future<void> setRating(int tmdbId, int stars) async {
-    _ratings[tmdbId] = stars;
+  Future<void> setRating(int tmdbId, int stars, {String? mediaType}) async {
+    final ratingKey = mediaKey(tmdbId, mediaType);
+    _ratings[ratingKey] = stars;
     try {
       final prefs = await SharedPreferences.getInstance();
       final key = 'streamsync_${_activeScope}_ratings';
       final existing = Map<String, dynamic>.from(
           jsonDecode(prefs.getString(key) ?? '{}'));
-      existing['$tmdbId'] = stars;
+      existing[ratingKey] = stars;
       await prefs.setString(key, jsonEncode(existing));
     } catch (e) {
       debugPrint('Error saving rating: $e');
@@ -106,7 +113,7 @@ class DatabaseService extends ChangeNotifier {
       if (raw != null) {
         final map = Map<String, dynamic>.from(jsonDecode(raw));
         _ratings.clear();
-        map.forEach((k, v) => _ratings[int.tryParse(k) ?? 0] = v as int);
+        map.forEach((k, v) => _ratings[k] = v as int);
       }
     } catch (e) {
       debugPrint('Error loading ratings: $e');
@@ -118,7 +125,33 @@ class DatabaseService extends ChangeNotifier {
   }
 
   // ── Helper: Get the active scope key ──────────────────────────────────────
-  String get _activeScope => _isLoggedIn ? "auth_user_$username" : _currentProfile;
+  String get _activeScope => _currentProfile;
+
+  // Older builds had a local-only "sign in" that stored data under
+  // `auth_user_<name>`, and a fake premium flag. Move that data into the
+  // active profile (unless the profile already has its own) and drop the
+  // old keys, so nobody loses their watchlist or history.
+  Future<void> _migrateLegacyAccount(SharedPreferences prefs) async {
+    final legacyUser = prefs.getString('streamsync_username') ?? '';
+    if ((prefs.getBool('streamsync_logged_in') ?? false) && legacyUser.isNotEmpty) {
+      for (final suffix in const ['watchlist', 'history', 'downloads', 'watch_stats', 'ratings']) {
+        final from = 'streamsync_auth_user_${legacyUser}_$suffix';
+        final to = 'streamsync_${_currentProfile}_$suffix';
+        final value = prefs.get(from);
+        if (value == null || prefs.containsKey(to)) continue;
+        if (value is List) {
+          await prefs.setStringList(to, value.cast<String>());
+        } else if (value is int) {
+          await prefs.setInt(to, value);
+        } else if (value is String) {
+          await prefs.setString(to, value);
+        }
+      }
+    }
+    for (final key in const ['streamsync_logged_in', 'streamsync_username', 'streamsync_email', 'streamsync_premium']) {
+      await prefs.remove(key);
+    }
+  }
 
   // ── Helper: Save list to prefs ─────────────────────────────────────────────
   Future<void> _saveList(String key, List<Map<String, dynamic>> list) async {
@@ -133,14 +166,12 @@ class DatabaseService extends ChangeNotifier {
 
   // ── Helper: Rebuild ID cache ──────────────────────────────────────────────
   void _rebuildIdCaches() {
-    _watchlistIds.clear();
-    _downloadIds.clear();
-    for (final item in _watchlist) {
-      _watchlistIds.add(item['id'] as int);
-    }
-    for (final item in _downloads) {
-      _downloadIds.add(item['id'] as int);
-    }
+    _watchlistKeys
+      ..clear()
+      ..addAll(_watchlist.map(_itemKey));
+    _downloadKeys
+      ..clear()
+      ..addAll(_downloads.map(_itemKey));
   }
 
   Future<void> _loadInitialConfig() async {
@@ -148,10 +179,7 @@ class DatabaseService extends ChangeNotifier {
       final prefs = await SharedPreferences.getInstance();
       _currentProfile = prefs.getString('streamsync_active_profile') ?? 'Enthusiast';
       _selectedCountry = prefs.getString('streamsync_country') ?? 'US';
-      _isPremium = prefs.getBool('streamsync_premium') ?? false;
-      _isLoggedIn = prefs.getBool('streamsync_logged_in') ?? false;
-      _username = prefs.getString('streamsync_username') ?? '';
-      _email = prefs.getString('streamsync_email') ?? '';
+      await _migrateLegacyAccount(prefs);
       _notifNewRelease = prefs.getBool('streamsync_notif_new_release') ?? true;
       _notifTrending = prefs.getBool('streamsync_notif_trending') ?? false;
 
@@ -212,37 +240,7 @@ class DatabaseService extends ChangeNotifier {
     }
   }
 
-  // ── Auth ──────────────────────────────────────────────────────────────────
-
-  Future<void> login(String username, String email) async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      _isLoggedIn = true;
-      _username = username;
-      _email = email;
-      await prefs.setBool('streamsync_logged_in', true);
-      await prefs.setString('streamsync_username', username);
-      await prefs.setString('streamsync_email', email);
-      await _loadProfileData();
-    } catch (e) {
-      debugPrint('Error logging in: $e');
-    }
-  }
-
-  Future<void> logout() async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      _isLoggedIn = false;
-      _username = '';
-      _email = '';
-      await prefs.remove('streamsync_logged_in');
-      await prefs.remove('streamsync_username');
-      await prefs.remove('streamsync_email');
-      await _loadProfileData();
-    } catch (e) {
-      debugPrint('Error logging out: $e');
-    }
-  }
+  // ── Profiles ──────────────────────────────────────────────────────────────
 
   Future<void> selectProfile(String profileName) async {
     try {
@@ -260,7 +258,8 @@ class DatabaseService extends ChangeNotifier {
   Future<void> addToWatchlist(Map<String, dynamic> item) async {
     try {
       final id = item['id'] as int;
-      if (_watchlistIds.contains(id)) return;
+      final key = _itemKey(item);
+      if (_watchlistKeys.contains(key)) return;
 
       _watchlist.add({
         'id': id,
@@ -274,7 +273,7 @@ class DatabaseService extends ChangeNotifier {
         'date_added': DateTime.now().toIso8601String(),
       });
 
-      _watchlistIds.add(id);
+      _watchlistKeys.add(key);
       await _saveList("streamsync_${_activeScope}_watchlist", _watchlist);
       notifyListeners();
     } catch (e) {
@@ -282,10 +281,10 @@ class DatabaseService extends ChangeNotifier {
     }
   }
 
-  Future<void> removeFromWatchlist(int id) async {
+  Future<void> removeFromWatchlist(int id, {String? mediaType}) async {
     try {
-      _watchlist.removeWhere((x) => x['id'] == id);
-      _watchlistIds.remove(id);
+      _watchlist.removeWhere((x) => _matches(x, id, mediaType));
+      _rebuildIdCaches();
       await _saveList("streamsync_${_activeScope}_watchlist", _watchlist);
       notifyListeners();
     } catch (e) {
@@ -297,7 +296,7 @@ class DatabaseService extends ChangeNotifier {
   Future<void> clearWatchlist() async {
     try {
       _watchlist.clear();
-      _watchlistIds.clear();
+      _watchlistKeys.clear();
       await _saveList("streamsync_${_activeScope}_watchlist", _watchlist);
       notifyListeners();
     } catch (e) {
@@ -305,16 +304,18 @@ class DatabaseService extends ChangeNotifier {
     }
   }
 
-  bool isInWatchlist(int id) => _watchlistIds.contains(id);
+  bool isInWatchlist(int id, {String? mediaType}) =>
+      _hasKey(_watchlistKeys, id, mediaType);
 
   // ── Watch History ─────────────────────────────────────────────────────────
 
   Future<void> addToHistory(Map<String, dynamic> item, {int? season, int? episode}) async {
     try {
       final id = item['id'] as int;
-      final isNewEntry = !_watchHistory.any((x) => x['id'] == id);
+      final mediaType = (item['media_type'] as String?) ?? 'movie';
+      final isNewEntry = !_watchHistory.any((x) => _matches(x, id, mediaType));
 
-      _watchHistory.removeWhere((x) => x['id'] == id);
+      _watchHistory.removeWhere((x) => _matches(x, id, mediaType));
       _watchHistory.insert(0, {
         'id': id,
         'title': item['title'] ?? item['name'] ?? 'Untitled',
@@ -348,9 +349,10 @@ class DatabaseService extends ChangeNotifier {
     }
   }
 
-  Future<void> updateHistoryProgress(int id, int progress, int duration) async {
+  Future<void> updateHistoryProgress(int id, int progress, int duration,
+      {String? mediaType}) async {
     try {
-      final index = _watchHistory.indexWhere((x) => x['id'] == id);
+      final index = _watchHistory.indexWhere((x) => _matches(x, id, mediaType));
       if (index != -1) {
         _watchHistory[index]['progress_seconds'] = progress;
         _watchHistory[index]['duration_seconds'] = duration;
@@ -373,9 +375,9 @@ class DatabaseService extends ChangeNotifier {
     }
   }
 
-  Future<void> removeFromHistory(int id) async {
+  Future<void> removeFromHistory(int id, {String? mediaType}) async {
     try {
-      _watchHistory.removeWhere((x) => x['id'] == id);
+      _watchHistory.removeWhere((x) => _matches(x, id, mediaType));
       await _saveList("streamsync_${_activeScope}_history", _watchHistory);
       notifyListeners();
     } catch (e) {
@@ -400,7 +402,8 @@ class DatabaseService extends ChangeNotifier {
   Future<void> addDownload(Map<String, dynamic> item) async {
     try {
       final id = item['id'] as int;
-      if (_downloadIds.contains(id)) return;
+      final key = _itemKey(item);
+      if (_downloadKeys.contains(key)) return;
 
       _downloads.add({
         'id': id,
@@ -415,7 +418,7 @@ class DatabaseService extends ChangeNotifier {
         'file_size_bytes': item['file_size_bytes'],
       });
 
-      _downloadIds.add(id);
+      _downloadKeys.add(key);
       await _saveList("streamsync_${_activeScope}_downloads", _downloads);
       notifyListeners();
     } catch (e) {
@@ -423,9 +426,10 @@ class DatabaseService extends ChangeNotifier {
     }
   }
 
-  Future<void> removeDownload(int id) async {
+  Future<void> removeDownload(int id, {String? mediaType}) async {
     try {
-      final item = _downloads.firstWhere((d) => d['id'] == id, orElse: () => {});
+      final item = _downloads.firstWhere((d) => _matches(d, id, mediaType),
+          orElse: () => {});
       if (item.isNotEmpty && item['local_file_path'] != null) {
         try {
           final file = File(item['local_file_path'] as String);
@@ -437,8 +441,8 @@ class DatabaseService extends ChangeNotifier {
         }
       }
 
-      _downloads.removeWhere((d) => d['id'] == id);
-      _downloadIds.remove(id);
+      _downloads.removeWhere((d) => _matches(d, id, mediaType));
+      _rebuildIdCaches();
       await _saveList("streamsync_${_activeScope}_downloads", _downloads);
       notifyListeners();
     } catch (e) {
@@ -446,7 +450,8 @@ class DatabaseService extends ChangeNotifier {
     }
   }
 
-  bool isDownloaded(int id) => _downloadIds.contains(id);
+  bool isDownloaded(int id, {String? mediaType}) =>
+      _hasKey(_downloadKeys, id, mediaType);
 
   // ── Settings ──────────────────────────────────────────────────────────────
 
@@ -478,7 +483,7 @@ class DatabaseService extends ChangeNotifier {
       final scope = _activeScope;
       _watchlist.clear();
       _watchHistory.clear();
-      _watchlistIds.clear();
+      _watchlistKeys.clear();
       _totalHoursWatched = 0;
 
       await prefs.remove("streamsync_${scope}_watchlist");
@@ -488,17 +493,6 @@ class DatabaseService extends ChangeNotifier {
       notifyListeners();
     } catch (e) {
       debugPrint('Error clearing database: $e');
-    }
-  }
-
-  Future<void> togglePremium() async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      _isPremium = !_isPremium;
-      await prefs.setBool('streamsync_premium', _isPremium);
-      notifyListeners();
-    } catch (e) {
-      debugPrint('Error toggling premium: $e');
     }
   }
 

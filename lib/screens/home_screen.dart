@@ -18,7 +18,6 @@ import 'see_all_screen.dart';
 import 'upcoming_releases_screen.dart';
 import 'watch_history_screen.dart';
 import 'settings_screen.dart';
-import 'login_screen.dart';
 import 'downloads_screen.dart';
 import 'search_screen.dart';
 
@@ -588,15 +587,11 @@ class _HomeScreenState extends State<HomeScreen>
       backgroundColor: _surface,
       child: SafeArea(
         child: Column(children: [
-          // Profile card — wrapped in Consumer so it reacts to profile/premium changes
+          // Profile card — wrapped in Consumer so it reacts to profile changes
           Consumer<DatabaseService>(
             builder: (context, db, _) {
-              final isPremium  = db.isPremium;
-              final isLoggedIn = db.isLoggedIn;
-              final username   = isLoggedIn ? db.username : db.currentProfile;
-              final sub        = isLoggedIn
-                  ? db.email
-                  : (isPremium ? 'Premium Active' : 'Free Account');
+              final username   = db.currentProfile;
+              const sub        = 'Local profile';
               Color profileColor = AppTheme.accent;
               if (db.currentProfile == 'Family') profileColor = Colors.blueAccent;
               if (db.currentProfile == 'Kids')   profileColor = Colors.greenAccent;
@@ -604,7 +599,6 @@ class _HomeScreenState extends State<HomeScreen>
                 username: username,
                 sub: sub,
                 profileColor: profileColor,
-                isPremium: isPremium,
               );
             },
           ),
@@ -612,8 +606,6 @@ class _HomeScreenState extends State<HomeScreen>
           Expanded(
             child: Consumer<DatabaseService>(
               builder: (context, db, _) {
-                final isLoggedIn = db.isLoggedIn;
-                final isPremium  = db.isPremium;
                 return SingleChildScrollView(
                   child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -643,19 +635,6 @@ class _HomeScreenState extends State<HomeScreen>
                           icon: Icons.settings_rounded,
                           label: 'Settings',
                           color: _dimText,
-                          onTap: () => navTo(const SettingsScreen()),
-                        ),
-                        if (!isLoggedIn)
-                          _DrawerItem(
-                            icon: Icons.login_rounded,
-                            label: 'Sign In / Sign Up',
-                            color: AppTheme.accent,
-                            onTap: () => navTo(
-                                const LoginScreen(showSkipButton: false)),
-                          ),
-                        const _DrawerDivider(),
-                        _DrawerUpgradeCard(
-                          isPremium: isPremium,
                           onTap: () => navTo(const SettingsScreen()),
                         ),
                       ]),
@@ -1194,7 +1173,7 @@ class _ContinueWatchingSection extends StatelessWidget {
             title: const Text('Remove from Continue Watching', style: TextStyle(color: Colors.redAccent)),
             onTap: () {
               Navigator.pop(ctx);
-              db.removeFromHistory(item['id']);
+              db.removeFromHistory(item['id'], mediaType: item['media_type']);
             },
           ),
           const SizedBox(height: 8),
@@ -1965,12 +1944,10 @@ class _DrawerProfileCard extends StatelessWidget {
     required this.username,
     required this.sub,
     required this.profileColor,
-    required this.isPremium,
   });
 
   final String username, sub;
   final Color profileColor;
-  final bool isPremium;
 
   @override
   Widget build(BuildContext context) {
@@ -2018,24 +1995,6 @@ class _DrawerProfileCard extends StatelessWidget {
                     style: const TextStyle(color: _dimText, fontSize: 11)),
               ]),
         ),
-        if (isPremium)
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-            decoration: BoxDecoration(
-              color: const Color(0x1F64FFDA),
-              borderRadius: BorderRadius.circular(20),
-              border: Border.all(color: const Color(0x4D64FFDA)),
-            ),
-            child: const Row(mainAxisSize: MainAxisSize.min, children: [
-              Icon(Icons.verified_rounded, color: Colors.tealAccent, size: 11),
-              SizedBox(width: 4),
-              Text('PRO',
-                  style: TextStyle(
-                      color: Colors.tealAccent,
-                      fontSize: 10,
-                      fontWeight: FontWeight.bold)),
-            ]),
-          ),
       ]),
     );
   }
@@ -2098,77 +2057,6 @@ class _DrawerItem extends StatelessWidget {
                   fontWeight: FontWeight.w500)),
           trailing: const Icon(Icons.chevron_right_rounded,
               color: Color(0x26FFFFFF), size: 16),
-        ),
-      ),
-    );
-  }
-}
-
-class _DrawerUpgradeCard extends StatelessWidget {
-  const _DrawerUpgradeCard({required this.isPremium, required this.onTap});
-  final bool isPremium;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        margin: const EdgeInsets.fromLTRB(16, 4, 16, 8),
-        padding: const EdgeInsets.all(14),
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            colors: isPremium
-                ? [const Color(0x1F64FFDA), const Color(0x0A64FFDA)]
-                : [AppTheme.accent.withValues(alpha: 0.15), AppTheme.accent.withValues(alpha: 0.05)],
-          ),
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(
-            color: isPremium
-                ? const Color(0x4064FFDA)
-                : AppTheme.accent.withValues(alpha: 0.3),
-          ),
-        ),
-        child: Row(
-          children: [
-            Icon(
-              isPremium ? Icons.verified_rounded : Icons.workspace_premium_rounded,
-              color: isPremium ? Colors.tealAccent : AppTheme.accent,
-              size: 22,
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    isPremium ? 'Premium Pro Active' : 'Upgrade to Premium',
-                    style: TextStyle(
-                      color: isPremium ? Colors.tealAccent : Colors.white,
-                      fontWeight: FontWeight.bold,
-                      fontSize: 13,
-                    ),
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    isPremium
-                        ? 'Lifetime · Ad-free'
-                        : 'Remove ads · \$1.99 lifetime',
-                    style: const TextStyle(
-                      color: AppTheme.textSecondary,
-                      fontSize: 11,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            if (!isPremium)
-              Icon(
-                Icons.arrow_forward_ios_rounded,
-                color: AppTheme.accent,
-                size: 12,
-              ),
-          ],
         ),
       ),
     );

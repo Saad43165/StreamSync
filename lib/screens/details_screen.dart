@@ -315,7 +315,7 @@ class _DetailsScreenState extends State<DetailsScreen> with TickerProviderStateM
   Future<void> _deleteDownload(
       BuildContext context, DatabaseService dbService, int id) async {
     final record = dbService.downloads.firstWhere(
-          (d) => d['id'] == id,
+          (d) => d['id'] == id && (d['media_type'] ?? 'movie') == widget.mediaType,
       orElse: () => {},
     );
     final filePath = record['local_file_path'] as String?;
@@ -324,7 +324,7 @@ class _DetailsScreenState extends State<DetailsScreen> with TickerProviderStateM
       if (await file.exists()) await file.delete();
     }
 
-    await dbService.removeDownload(id);
+    await dbService.removeDownload(id, mediaType: widget.mediaType);
 
     if (context.mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -498,7 +498,7 @@ class _DetailsScreenState extends State<DetailsScreen> with TickerProviderStateM
                   SliverToBoxAdapter(
                     child: Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 20),
-                      child: _StarRatingRow(tmdbId: widget.id),
+                      child: _StarRatingRow(tmdbId: widget.id, mediaType: widget.mediaType),
                     ),
                   ),
 
@@ -751,7 +751,8 @@ class _DetailsScreenState extends State<DetailsScreen> with TickerProviderStateM
 
           const SizedBox(height: 10),
 
-          _WatchlistButton(itemId: widget.id, details: details),
+          _WatchlistButton(
+              itemId: widget.id, mediaType: widget.mediaType, details: details),
         ],
       ),
     );
@@ -1132,7 +1133,8 @@ class _GlassAppBar extends StatelessWidget {
                 ),
                 Consumer<DatabaseService>(
                   builder: (context, dbService, _) {
-                    final isSaved = dbService.isInWatchlist(details['id']);
+                    final isSaved = dbService.isInWatchlist(details['id'],
+                        mediaType: details['media_type']);
 
                     return Row(
                       children: [
@@ -1143,7 +1145,8 @@ class _GlassAppBar extends StatelessWidget {
                           iconColor: isSaved ? AppTheme.accent : Colors.white,
                           onTap: () {
                             if (isSaved) {
-                              dbService.removeFromWatchlist(details['id']);
+                              dbService.removeFromWatchlist(details['id'],
+                                  mediaType: details['media_type']);
                               ScaffoldMessenger.of(context).showSnackBar(
                                   const SnackBar(
                                     content: Text('Removed from watchlist'),
@@ -1661,23 +1664,25 @@ class _CastCard extends StatelessWidget {
 
 class _WatchlistButton extends StatelessWidget {
   final int itemId;
+  final String mediaType;
   final Map<String, dynamic> details;
   const _WatchlistButton({
     required this.itemId,
+    required this.mediaType,
     required this.details,
   });
 
   @override
   Widget build(BuildContext context) {
     return Selector<DatabaseService, bool>(
-      selector: (_, db) => db.isInWatchlist(itemId),
+      selector: (_, db) => db.isInWatchlist(itemId, mediaType: mediaType),
       builder: (context, inWatchlist, child) {
         final db = Provider.of<DatabaseService>(context, listen: false);
         return GestureDetector(
           onTap: () {
             HapticFeedback.lightImpact();
             if (inWatchlist) {
-              db.removeFromWatchlist(itemId);
+              db.removeFromWatchlist(itemId, mediaType: mediaType);
               ScaffoldMessenger.of(context).showSnackBar(
                   const SnackBar(
                     content: Text('Removed from watchlist'),
@@ -1745,12 +1750,13 @@ class _WatchlistButton extends StatelessWidget {
 
 class _StarRatingRow extends StatelessWidget {
   final int tmdbId;
-  const _StarRatingRow({required this.tmdbId});
+  final String mediaType;
+  const _StarRatingRow({required this.tmdbId, required this.mediaType});
 
   @override
   Widget build(BuildContext context) {
     final db = context.watch<DatabaseService>();
-    final current = db.getRating(tmdbId);
+    final current = db.getRating(tmdbId, mediaType: mediaType);
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       const Text('Your rating',
           style: TextStyle(color: Colors.white54, fontSize: 11, fontWeight: FontWeight.w500)),
@@ -1761,7 +1767,7 @@ class _StarRatingRow extends StatelessWidget {
           final filled = current != null && current > i;
           return GestureDetector(
             onTap: () {
-              Provider.of<DatabaseService>(context, listen: false).setRating(tmdbId, i + 1);
+              Provider.of<DatabaseService>(context, listen: false).setRating(tmdbId, i + 1, mediaType: mediaType);
             },
             child: Padding(
               padding: const EdgeInsets.only(right: 4),
