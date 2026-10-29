@@ -145,7 +145,8 @@ class DownloadsScreen extends StatelessWidget {
     }
 
     // Remove DB record
-    await dbService.removeDownload(item['id'] as int);
+    await dbService.removeDownload(item['id'] as int,
+        mediaType: item['media_type'] as String?);
 
     if (context.mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -192,7 +193,8 @@ class DownloadsScreen extends StatelessWidget {
         final f = File(fp);
         if (await f.exists()) await f.delete();
       }
-      await dbService.removeDownload(item['id'] as int);
+      await dbService.removeDownload(item['id'] as int,
+        mediaType: item['media_type'] as String?);
     }
   }
 }

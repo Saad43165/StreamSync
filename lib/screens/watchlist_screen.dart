@@ -122,7 +122,7 @@ class WatchlistScreen extends StatelessWidget {
                     ),
                   );
                 },
-                onDelete: () => dbService.removeFromWatchlist(item['id']),
+                onDelete: () => dbService.removeFromWatchlist(item['id'], mediaType: item['media_type']),
               );
             },
           ),

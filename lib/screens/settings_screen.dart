@@ -172,7 +172,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
     final list = List.from(dbService.downloads);
     for (final item in list) {
-      await dbService.removeDownload(item['id'] as int);
+      await dbService.removeDownload(item['id'] as int,
+          mediaType: item['media_type'] as String?);
       if (!_safeMounted) return;
     }
     await _loadMetrics();

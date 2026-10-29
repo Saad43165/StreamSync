@@ -576,7 +576,7 @@ class _ProfileScreenState extends State<ProfileScreen>
               leading: const Icon(Icons.delete_outline, color: Colors.redAccent),
               title: const Text('Remove from watchlist', style: TextStyle(color: Colors.redAccent)),
               onTap: () {
-                db.removeFromWatchlist(item['id']);
+                db.removeFromWatchlist(item['id'], mediaType: item['media_type']);
                 Navigator.pop(ctx);
                 ScaffoldMessenger.of(context).showSnackBar(
                   const SnackBar(content: Text('Removed from watchlist'), duration: Duration(seconds: 2)),

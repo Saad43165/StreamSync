@@ -4,7 +4,7 @@
 
 StreamSync is a premium, modern streaming discovery and tracking application built with Flutter. It provides a seamless way to explore trending movies, TV shows, and platform-exclusive content from major streaming giants like Netflix, Amazon Prime Video, and Disney+.
 
-![App Icon](assets/app_icon.jpg)
+![App Icon](assets/app_icon.png)
 
 ## ✨ Key Features
 
@@ -22,7 +22,7 @@ StreamSync is a premium, modern streaming discovery and tracking application bui
 *   **Framework**: [Flutter](https://flutter.dev/) (Dart)
 *   **State Management**: [Provider](https://pub.dev/packages/provider)
 *   **Data Source**: [The Movie Database (TMDB) API](https://www.themoviedb.org/documentation/api)
-*   **Local Storage**: [Shared Preferences](https://pub.dev/packages/shared_preferences)
+*   **Local Storage**: [Shared Preferences](https://pub.dev/packages/shared_preferences) and [Hive](https://pub.dev/packages/hive) (TMDB response cache)
 *   **WebView**: [Flutter InAppWebView](https://pub.dev/packages/flutter_inappwebview)
 *   **Video Playback**: [YouTube Player Flutter](https://pub.dev/packages/youtube_player_flutter)
 
@@ -30,7 +30,7 @@ StreamSync is a premium, modern streaming discovery and tracking application bui
 
 ### Prerequisites
 
-*   Flutter SDK (v3.11.5 or higher)
+*   Flutter SDK 3.41 or higher (Dart 3.11.5+)
 *   Dart SDK
 *   Android Studio / VS Code with Flutter extension
 
@@ -47,18 +47,30 @@ StreamSync is a premium, modern streaming discovery and tracking application bui
     flutter pub get
     ```
 
-3.  **Configure API Key**:
-    To unlock live data and search features, you need a free API key from TMDB.
-    *   Go to `lib/config/config.dart`.
-    *   Add your API key:
-    ```dart
-    static const String apiKey = 'YOUR_TMDB_API_KEY_HERE';
+3.  **Run the app with your TMDB API key:**
+    Get a free key from [themoviedb.org](https://www.themoviedb.org/settings/api) and pass it at build time, so it never lands in source control:
+    ```bash
+    flutter run --dart-define=TMDB_API_KEY=your_key_here
+    ```
+    The same flag works for `flutter build apk`. It is read in `lib/config/config.dart`.
+
+4.  **Run the tests:**
+    ```bash
+    flutter test
     ```
 
-4.  **Run the app:**
-    ```bash
-    flutter run
-    ```
+### Release signing (Android)
+
+Create `android/key.properties` (it is git-ignored) pointing at your upload keystore:
+
+```properties
+storeFile=/absolute/path/to/upload-keystore.jks
+storePassword=...
+keyAlias=upload
+keyPassword=...
+```
+
+Without it, release builds are signed with the debug key, which is fine for sideloading but can't be uploaded to a store.
 
 ## 📸 UI Showcase
 

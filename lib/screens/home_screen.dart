@@ -1194,7 +1194,7 @@ class _ContinueWatchingSection extends StatelessWidget {
             title: const Text('Remove from Continue Watching', style: TextStyle(color: Colors.redAccent)),
             onTap: () {
               Navigator.pop(ctx);
-              db.removeFromHistory(item['id']);
+              db.removeFromHistory(item['id'], mediaType: item['media_type']);
             },
           ),
           const SizedBox(height: 8),

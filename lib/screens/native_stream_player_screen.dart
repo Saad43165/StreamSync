@@ -396,7 +396,7 @@ class _NativeStreamPlayerScreenState extends State<NativeStreamPlayerScreen>
     if (widget.localFilePath != null) {
       // For offline content, try to get poster from downloads
       final db = Provider.of<DatabaseService>(context, listen: false);
-      final download = db.downloads.where((d) => d['id'] == widget.id).firstOrNull;
+      final download = db.downloads.where((d) => d['id'] == widget.id && (d['media_type'] ?? 'movie') == widget.mediaType).firstOrNull;
       if (download != null && download['poster_path'] != null) {
         return download['poster_path'] as String?;
       }
@@ -406,7 +406,7 @@ class _NativeStreamPlayerScreenState extends State<NativeStreamPlayerScreen>
     final db = Provider.of<DatabaseService>(context, listen: false);
 
     // Check watchlist first
-    final watchlistItem = db.watchlist.where((w) => w['id'] == widget.id).firstOrNull;
+    final watchlistItem = db.watchlist.where((w) => w['id'] == widget.id && (w['media_type'] ?? 'movie') == widget.mediaType).firstOrNull;
     if (watchlistItem != null && watchlistItem['poster_path'] != null) {
       return watchlistItem['poster_path'] as String?;
     }
@@ -972,7 +972,7 @@ class _NativeStreamPlayerScreenState extends State<NativeStreamPlayerScreen>
     }
 
     if (dur > 0) {
-      db.updateHistoryProgress(widget.id, pos, dur);
+      db.updateHistoryProgress(widget.id, pos, dur, mediaType: widget.mediaType);
     }
   }
   /// Switches from WebView to native media_kit playback using an intercepted video URL

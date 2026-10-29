@@ -86,7 +86,7 @@ class TMDBService extends ChangeNotifier {
     28: 'Action', 12: 'Adventure', 16: 'Animation', 35: 'Comedy',
     80: 'Crime', 99: 'Documentary', 18: 'Drama', 10751: 'Family',
     14: 'Fantasy', 36: 'History', 27: 'Horror', 10402: 'Music',
-    9648: 'Mystery', 10749: 'Romance', 878: 'Sci-Fi', 53: 'Thriller',
+    9648: 'Mystery', 10749: 'Romance', 878: 'Sci-Fi', 10770: 'TV Movie', 53: 'Thriller',
     10752: 'War', 37: 'Western',
   };
   static const Map<int, String> tvGenres = {
@@ -101,50 +101,10 @@ class TMDBService extends ChangeNotifier {
   String? _lastFetchError;
   String? get lastFetchError => _lastFetchError;
 
-  static const Map<int, String> _movieGenreNames = {
-    28: 'Action',
-    12: 'Adventure',
-    16: 'Animation',
-    35: 'Comedy',
-    80: 'Crime',
-    99: 'Documentary',
-    18: 'Drama',
-    10751: 'Family',
-    14: 'Fantasy',
-    36: 'History',
-    27: 'Horror',
-    10402: 'Music',
-    9648: 'Mystery',
-    10749: 'Romance',
-    878: 'Sci-Fi',
-    10770: 'TV Movie',
-    53: 'Thriller',
-    10752: 'War',
-    37: 'Western',
-  };
-  static const Map<int, String> _tvGenreNames = {
-    10759: 'Action & Adventure',
-    16: 'Animation',
-    35: 'Comedy',
-    80: 'Crime',
-    99: 'Documentary',
-    18: 'Drama',
-    10751: 'Family',
-    10762: 'Kids',
-    9648: 'Mystery',
-    10763: 'News',
-    10764: 'Reality',
-    10765: 'Sci-Fi & Fantasy',
-    10766: 'Soap',
-    10767: 'Talk',
-    10768: 'War & Politics',
-    37: 'Western',
-  };
-
   static List<String> genreNamesFor(Map<String, dynamic> item) {
     final isTv = item['media_type'] == 'tv';
     final ids = (item['genre_ids'] as List<dynamic>? ?? []).cast<int>();
-    final map = isTv ? _tvGenreNames : _movieGenreNames;
+    final map = isTv ? tvGenres : movieGenres;
     return ids.map((id) => map[id]).whereType<String>().toList();
   }
 
@@ -170,10 +130,21 @@ class TMDBService extends ChangeNotifier {
   // INTELLIGENT SEARCH
   // ═══════════════════════════════════════════════════════════════════════════
 
+  // Bumped on every search() call so a slow, older search can't overwrite
+  // the results of a newer one when its responses arrive late.
+  int _searchGeneration = 0;
+
   Future<void> search(String query) async {
+    final generation = ++_searchGeneration;
+    bool isStale() => generation != _searchGeneration;
+
     if (query.isEmpty) {
       _searchResults = [];
-      notifyListeners();
+      if (_isLoading) {
+        _setLoading(false);
+      } else {
+        notifyListeners();
+      }
       return;
     }
 
@@ -189,82 +160,90 @@ class TMDBService extends ChangeNotifier {
 
     _setLoading(true);
     try {
-      final Map<int, Map<String, dynamic>> resultsById = {};
+      // Keyed by "<media_type>:<id>": movie and TV ids are separate namespaces.
+      final Map<String, Map<String, dynamic>> resultsByKey = {};
 
+      // TMDB search already matches original, translated and alternative
+      // titles whatever the language parameter, so one movie and one TV
+      // request per query cover what used to take five.
       Future<void> runQueryBatch(String q) async {
-        final futures = <Future<http.Response>>[
-          http.get(Uri.parse(
-              '$_baseUrl/search/movie?api_key=${AppConfig.tmdbApiKey}&query=${Uri.encodeComponent(q)}&language=en-US&page=1&include_adult=false')),
-          http.get(Uri.parse(
-              '$_baseUrl/search/movie?api_key=${AppConfig.tmdbApiKey}&query=${Uri.encodeComponent(q)}&language=hi-IN&page=1&include_adult=false')),
-          http.get(Uri.parse(
-              '$_baseUrl/search/tv?api_key=${AppConfig.tmdbApiKey}&query=${Uri.encodeComponent(q)}&language=en-US&page=1&include_adult=false')),
-          http.get(Uri.parse(
-              '$_baseUrl/search/tv?api_key=${AppConfig.tmdbApiKey}&query=${Uri.encodeComponent(q)}&language=hi-IN&page=1&include_adult=false')),
-          http.get(Uri.parse(
-              '$_baseUrl/search/multi?api_key=${AppConfig.tmdbApiKey}&query=${Uri.encodeComponent(q)}&language=en-US&page=1&include_adult=false')),
-        ];
-        final responses = await Future.wait(
-            futures.map((f) => f.timeout(const Duration(seconds: 10))));
-        for (final response in responses) {
+        final encoded = Uri.encodeComponent(q);
+        final responses = await Future.wait([
+          for (final type in const ['movie', 'tv'])
+            _dedupGet(
+                '$_baseUrl/search/$type?api_key=${AppConfig.tmdbApiKey}&query=$encoded&language=en-US&page=1&include_adult=false',
+                timeout: const Duration(seconds: 10)),
+        ]);
+        for (var i = 0; i < responses.length; i++) {
+          final response = responses[i];
           if (response.statusCode != 200) continue;
+          final mediaType = i == 0 ? 'movie' : 'tv';
           final data = json.decode(response.body);
           final results = data['results'] as List<dynamic>? ?? [];
           for (final item in results) {
             final id = item['id'] as int?;
             if (id == null) continue;
-            var mediaType = item['media_type'] as String?;
-            mediaType ??= item.containsKey('first_air_date') ? 'tv' : 'movie';
-            if (mediaType != 'movie' && mediaType != 'tv') continue;
             item['media_type'] = mediaType;
-            resultsById.putIfAbsent(id, () => Map<String, dynamic>.from(item));
+            resultsByKey.putIfAbsent(
+                '$mediaType:$id', () => Map<String, dynamic>.from(item));
           }
         }
       }
 
-      await runQueryBatch(query);
+      final personMatches = <String, Map<String, dynamic>>{};
+      await Future.wait([
+        runQueryBatch(query),
+        _searchByPerson(query, personMatches),
+      ]);
+      if (isStale()) return;
 
-      if (resultsById.length < 4) {
-        final variants = _generateQueryVariants(query);
-        if (variants.isNotEmpty) {
-          await Future.wait(variants.map(runQueryBatch));
-        }
+      if (resultsByKey.length < 4) {
+        final variants = _generateQueryVariants(query).take(3);
+        await Future.wait(variants.map(runQueryBatch));
+        if (isStale()) return;
       }
 
-      await _searchByPerson(query, resultsById);
-
-      final allResults = resultsById.values.toList();
-      final queryLower = query.toLowerCase();
-      allResults.sort((a, b) {
-        double score(Map item) {
-          final title = ((item['title'] ?? item['name'] ?? '') as String);
-          final pop = (item['popularity'] as num?)?.toDouble() ?? 0.0;
-          final sim = _similarity(title, query);
-          final exactBonus = title.toLowerCase() == queryLower ? 100.0 : 0.0;
-          final castBonus = item['_matchedVia'] != null ? 15.0 : 0.0;
-          return pop + (sim * 50) + exactBonus + castBonus;
+      personMatches.forEach((key, item) {
+        final existing = resultsByKey[key];
+        if (existing != null) {
+          existing['_matchedVia'] = item['_matchedVia'];
+        } else {
+          resultsByKey[key] = item;
         }
-        return score(b).compareTo(score(a));
       });
+
+      final allResults = resultsByKey.values.toList();
+      final queryLower = query.toLowerCase();
+      double score(Map item) {
+        final title = ((item['title'] ?? item['name'] ?? '') as String);
+        final pop = (item['popularity'] as num?)?.toDouble() ?? 0.0;
+        final sim = _similarity(title, query);
+        final exactBonus = title.toLowerCase() == queryLower ? 100.0 : 0.0;
+        final castBonus = item['_matchedVia'] != null ? 15.0 : 0.0;
+        return pop + (sim * 50) + exactBonus + castBonus;
+      }
+      final scores = {for (final item in allResults) item: score(item)};
+      allResults.sort((a, b) => scores[b]!.compareTo(scores[a]!));
 
       _searchResults = allResults;
     } catch (e) {
       debugPrint('Error searching TMDB: $e');
-      await _fallbackSearch(query);
+      if (!isStale()) await _fallbackSearch(query);
     } finally {
-      _setLoading(false);
+      if (!isStale()) _setLoading(false);
     }
   }
 
+  /// Adds the best-known titles of people whose name matches [query] to
+  /// [results], keyed by `media_type:id` and tagged with `_matchedVia`.
   Future<void> _searchByPerson(
       String query,
-      Map<int, Map<String, dynamic>> resultsById,
+      Map<String, Map<String, dynamic>> results,
       ) async {
     try {
-      final res = await http
-          .get(Uri.parse(
-          '$_baseUrl/search/person?api_key=${AppConfig.tmdbApiKey}&query=${Uri.encodeComponent(query)}&language=en-US&page=1&include_adult=false'))
-          .timeout(const Duration(seconds: 10));
+      final res = await _dedupGet(
+          '$_baseUrl/search/person?api_key=${AppConfig.tmdbApiKey}&query=${Uri.encodeComponent(query)}&language=en-US&page=1&include_adult=false',
+          timeout: const Duration(seconds: 10));
       if (res.statusCode != 200) return;
       final data = json.decode(res.body);
       final people = (data['results'] as List<dynamic>? ?? []);
@@ -279,19 +258,19 @@ class TMDBService extends ChangeNotifier {
       });
 
       final topPeople = people.where((p) {
-        return _similarity((p['name'] ?? '') as String, query) > 0.35;
+        return p['id'] is int &&
+            _similarity((p['name'] ?? '') as String, query) > 0.35;
       }).take(2).toList();
 
-      for (final person in topPeople) {
-        final personId = person['id'] as int?;
-        final personName = person['name'] as String? ?? '';
-        if (personId == null) continue;
+      final creditResponses = await Future.wait(topPeople.map((person) =>
+          _dedupGet(
+              '$_baseUrl/person/${person['id']}/combined_credits?api_key=${AppConfig.tmdbApiKey}&language=en-US',
+              timeout: const Duration(seconds: 10))));
 
-        final creditsRes = await http
-            .get(Uri.parse(
-            '$_baseUrl/person/$personId/combined_credits?api_key=${AppConfig.tmdbApiKey}&language=en-US'))
-            .timeout(const Duration(seconds: 10));
+      for (var i = 0; i < topPeople.length; i++) {
+        final creditsRes = creditResponses[i];
         if (creditsRes.statusCode != 200) continue;
+        final personName = topPeople[i]['name'] as String? ?? '';
 
         final creditsData = json.decode(creditsRes.body);
         final cast = (creditsData['cast'] as List<dynamic>? ?? []);
@@ -308,14 +287,12 @@ class TMDBService extends ChangeNotifier {
           mediaType ??= credit.containsKey('first_air_date') ? 'tv' : 'movie';
           if (mediaType != 'movie' && mediaType != 'tv') continue;
 
-          if (resultsById.containsKey(id)) {
-            resultsById[id]!['_matchedVia'] = personName;
-          } else {
+          results.putIfAbsent('$mediaType:$id', () {
             final item = Map<String, dynamic>.from(credit);
             item['media_type'] = mediaType;
             item['_matchedVia'] = personName;
-            resultsById[id] = item;
-          }
+            return item;
+          });
         }
       }
     } catch (e) {
@@ -1015,7 +992,9 @@ class TMDBService extends ChangeNotifier {
       String mediaType,
       String countryCode,
       ) async {
-    if (!hasApiKey) return _getMockDetails(id, mediaType, countryCode);
+    if (!hasApiKey) {
+      return _getMockDetails(id, mediaType, countryCode)..['media_type'] = mediaType;
+    }
     try {
       final response = await http
           .get(Uri.parse(
@@ -1024,7 +1003,9 @@ class TMDBService extends ChangeNotifier {
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
         try {
-          return _parseDetails(data, countryCode);
+          // TMDB detail responses carry no media_type; watchlist, history
+          // and downloads need it to tell a movie and a show with the same id apart.
+          return _parseDetails(data, countryCode)..['media_type'] = mediaType;
         } catch (e, st) {
           debugPrint('Error parsing details for id=$id: $e\n$st');
           return null;
