@@ -1,8 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'package:streamsync/main.dart';
-import 'login_screen.dart';
 
 class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key});
@@ -53,14 +51,11 @@ class _SplashScreenState extends State<SplashScreen>
   Future<void> _navigate() async {
     if (!mounted) return;
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
-    final prefs = await SharedPreferences.getInstance();
-    final seen = prefs.getBool('streamsync_seen_onboarding') ?? false;
-    if (!mounted) return;
     Navigator.pushReplacement(
       context,
       PageRouteBuilder(
         pageBuilder: (_, __, ___) =>
-            seen ? const MainNavigationShell() : const LoginScreen(showSkipButton: true),
+            const MainNavigationShell(),
         transitionDuration: Duration.zero,
         reverseTransitionDuration: Duration.zero,
       ),

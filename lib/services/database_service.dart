@@ -16,9 +16,6 @@ class DatabaseService extends ChangeNotifier {
   String _selectedCountry = 'US';
   String get selectedCountry => _selectedCountry;
 
-  bool _isPremium = false;
-  bool get isPremium => _isPremium;
-
   bool _notifNewRelease = true;
   bool get notifNewRelease => _notifNewRelease;
 
@@ -55,21 +52,12 @@ class DatabaseService extends ChangeNotifier {
   /// Retrieve the cached real video URL for a given tmdbId (null if not yet captured)
   String? getInterceptedUrl(int tmdbId) => _interceptedUrls[tmdbId];
 
-  // Multi-Profile & Auth system
+  // Multi-Profile system (all data is local to the device)
   String _currentProfile = 'Enthusiast';
   String get currentProfile => _currentProfile;
 
   final List<String> _profiles = ['Enthusiast', 'Family', 'Kids'];
   List<String> get profiles => List.unmodifiable(_profiles);
-
-  bool _isLoggedIn = false;
-  bool get isLoggedIn => _isLoggedIn;
-
-  String _username = '';
-  String get username => _username;
-
-  String _email = '';
-  String get email => _email;
 
   // NEW: Loading state
   bool _isLoading = true;
@@ -137,7 +125,33 @@ class DatabaseService extends ChangeNotifier {
   }
 
   // ── Helper: Get the active scope key ──────────────────────────────────────
-  String get _activeScope => _isLoggedIn ? "auth_user_$username" : _currentProfile;
+  String get _activeScope => _currentProfile;
+
+  // Older builds had a local-only "sign in" that stored data under
+  // `auth_user_<name>`, and a fake premium flag. Move that data into the
+  // active profile (unless the profile already has its own) and drop the
+  // old keys, so nobody loses their watchlist or history.
+  Future<void> _migrateLegacyAccount(SharedPreferences prefs) async {
+    final legacyUser = prefs.getString('streamsync_username') ?? '';
+    if ((prefs.getBool('streamsync_logged_in') ?? false) && legacyUser.isNotEmpty) {
+      for (final suffix in const ['watchlist', 'history', 'downloads', 'watch_stats', 'ratings']) {
+        final from = 'streamsync_auth_user_${legacyUser}_$suffix';
+        final to = 'streamsync_${_currentProfile}_$suffix';
+        final value = prefs.get(from);
+        if (value == null || prefs.containsKey(to)) continue;
+        if (value is List) {
+          await prefs.setStringList(to, value.cast<String>());
+        } else if (value is int) {
+          await prefs.setInt(to, value);
+        } else if (value is String) {
+          await prefs.setString(to, value);
+        }
+      }
+    }
+    for (final key in const ['streamsync_logged_in', 'streamsync_username', 'streamsync_email', 'streamsync_premium']) {
+      await prefs.remove(key);
+    }
+  }
 
   // ── Helper: Save list to prefs ─────────────────────────────────────────────
   Future<void> _saveList(String key, List<Map<String, dynamic>> list) async {
@@ -165,10 +179,7 @@ class DatabaseService extends ChangeNotifier {
       final prefs = await SharedPreferences.getInstance();
       _currentProfile = prefs.getString('streamsync_active_profile') ?? 'Enthusiast';
       _selectedCountry = prefs.getString('streamsync_country') ?? 'US';
-      _isPremium = prefs.getBool('streamsync_premium') ?? false;
-      _isLoggedIn = prefs.getBool('streamsync_logged_in') ?? false;
-      _username = prefs.getString('streamsync_username') ?? '';
-      _email = prefs.getString('streamsync_email') ?? '';
+      await _migrateLegacyAccount(prefs);
       _notifNewRelease = prefs.getBool('streamsync_notif_new_release') ?? true;
       _notifTrending = prefs.getBool('streamsync_notif_trending') ?? false;
 
@@ -229,37 +240,7 @@ class DatabaseService extends ChangeNotifier {
     }
   }
 
-  // ── Auth ──────────────────────────────────────────────────────────────────
-
-  Future<void> login(String username, String email) async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      _isLoggedIn = true;
-      _username = username;
-      _email = email;
-      await prefs.setBool('streamsync_logged_in', true);
-      await prefs.setString('streamsync_username', username);
-      await prefs.setString('streamsync_email', email);
-      await _loadProfileData();
-    } catch (e) {
-      debugPrint('Error logging in: $e');
-    }
-  }
-
-  Future<void> logout() async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      _isLoggedIn = false;
-      _username = '';
-      _email = '';
-      await prefs.remove('streamsync_logged_in');
-      await prefs.remove('streamsync_username');
-      await prefs.remove('streamsync_email');
-      await _loadProfileData();
-    } catch (e) {
-      debugPrint('Error logging out: $e');
-    }
-  }
+  // ── Profiles ──────────────────────────────────────────────────────────────
 
   Future<void> selectProfile(String profileName) async {
     try {
@@ -512,17 +493,6 @@ class DatabaseService extends ChangeNotifier {
       notifyListeners();
     } catch (e) {
       debugPrint('Error clearing database: $e');
-    }
-  }
-
-  Future<void> togglePremium() async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      _isPremium = !_isPremium;
-      await prefs.setBool('streamsync_premium', _isPremium);
-      notifyListeners();
-    } catch (e) {
-      debugPrint('Error toggling premium: $e');
     }
   }
 

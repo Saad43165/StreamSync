@@ -7,7 +7,6 @@ import 'package:flutter_animate/flutter_animate.dart';
 import '../services/database_service.dart';
 import '../services/tmdb_service.dart';
 import '../theme/app_theme.dart';
-import '../screens/login_screen.dart';
 import '../widgets/glass_card.dart';
 
 class SettingsScreen extends StatefulWidget {
@@ -212,60 +211,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              _sectionLabel('Account Details'),
-              _settingsCard([
-                if (dbService.isLoggedIn) ...[
-                  _infotile(
-                    icon: Icons.person_rounded,
-                    label: 'Signed in as',
-                    trailing: Text(
-                      '@${dbService.username}',
-                      style: const TextStyle(color: AppTheme.accent, fontSize: 13, fontWeight: FontWeight.bold),
-                    ),
-                  ),
-                  _divider(),
-                  _infotile(
-                    icon: Icons.email_outlined,
-                    label: 'Email Address',
-                    trailing: Text(
-                      dbService.email,
-                      style: const TextStyle(color: AppTheme.textSecondary, fontSize: 12),
-                    ),
-                  ),
-                  _divider(),
-                  _actiontile(
-                    icon: Icons.logout_rounded,
-                    label: 'Sign Out Account',
-                    color: Colors.redAccent,
-                    onTap: () {
-                      dbService.logout();
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text('Signed out successfully.')),
-                      );
-                    },
-                  ),
-                ] else ...[
-                  _actiontile(
-                    icon: Icons.login_rounded,
-                    label: 'Sign In / Register Account',
-                    color: AppTheme.accent,
-                    onTap: () => Navigator.push(
-                      context,
-                      MaterialPageRoute(builder: (_) => const LoginScreen(showSkipButton: false)),
-                    ),
-                  ),
-                  const Padding(
-                    padding: EdgeInsets.fromLTRB(16, 4, 16, 14),
-                    child: Text(
-                      'Unlock cross-device sync of watchlist, watch history progress, and offline settings preferences.',
-                      style: TextStyle(color: AppTheme.textSecondary, fontSize: 11, height: 1.4),
-                    ),
-                  ),
-                ],
-              ]).animate().fade(duration: 350.ms).slideY(begin: 0.1, end: 0, curve: Curves.easeOutQuad),
-
-              const SizedBox(height: 20),
-
               _sectionLabel('Device & App Statistics'),
               GridView.count(
                 shrinkWrap: true,
@@ -426,11 +371,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   onChanged: (v) => dbService.toggleNotifTrending(v),
                 ),
               ]).animate().fade(duration: 550.ms, delay: 200.ms).slideY(begin: 0.1, end: 0, curve: Curves.easeOutQuad),
-
-              const SizedBox(height: 20),
-
-              _sectionLabel('Premium License'),
-              _premiumCard(context, dbService).animate().fade(duration: 600.ms, delay: 250.ms).slideY(begin: 0.1, end: 0, curve: Curves.easeOutQuad),
 
               const SizedBox(height: 20),
 
@@ -650,107 +590,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
     return const Padding(padding: EdgeInsets.symmetric(horizontal: 16), child: Divider(height: 1, color: Colors.white10));
   }
 
-  Widget _premiumCard(BuildContext context, DatabaseService dbService) {
-    final isPremium = dbService.isPremium;
-    return Container(
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          colors: isPremium ? [const Color(0xFF0F261C), const Color(0xFF07120D)] : [const Color(0xFF281E10), const Color(0xFF130E07)],
-          begin: Alignment.topLeft, end: Alignment.bottomRight,
-        ),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: isPremium ? Colors.tealAccent.withValues(alpha: 0.25) : AppTheme.secondaryAccent.withValues(alpha: 0.3), width: 1),
-      ),
-      padding: const EdgeInsets.all(18),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Icon(isPremium ? Icons.verified_user_rounded : Icons.workspace_premium_rounded, color: isPremium ? Colors.tealAccent : AppTheme.secondaryAccent, size: 26),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(isPremium ? 'Premium Pro Member' : 'Unlock Premium Access', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14)),
-                    Text(isPremium ? 'Lifetime License Activated • No Ads' : 'Secure sandbox checkout simulator',
-                        style: TextStyle(color: isPremium ? Colors.tealAccent.withValues(alpha: 0.75) : AppTheme.secondaryAccent.withValues(alpha: 0.75), fontSize: 11)),
-                  ],
-                ),
-              ),
-            ],
-          ),
-          if (!isPremium) ...[
-            const SizedBox(height: 14),
-            const Wrap(spacing: 6, runSpacing: 4, children: [
-              _BenefitChip('No Ad-rolls'), _BenefitChip('Global Servers'), _BenefitChip('Sync Data'), _BenefitChip('Sandboxed'),
-            ]),
-            const SizedBox(height: 16),
-            SizedBox(
-              width: double.infinity,
-              child: ElevatedButton(
-                onPressed: () => _showCheckoutSheet(context, dbService),
-                style: ElevatedButton.styleFrom(backgroundColor: AppTheme.secondaryAccent, foregroundColor: Colors.black, elevation: 0, padding: const EdgeInsets.symmetric(vertical: 12), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))),
-                child: const Text('Launch Sandbox Upgrader', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
-              ),
-            ),
-          ] else ...[
-            const SizedBox(height: 12),
-            TextButton(
-              onPressed: () { dbService.togglePremium(); ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Membership deactivated (sandbox).'))); },
-              child: const Text('Restore Free Access tier', style: TextStyle(color: Colors.white24, fontSize: 11, decoration: TextDecoration.underline)),
-            ),
-          ],
-        ],
-      ),
-    );
-  }
-
-  void _showCheckoutSheet(BuildContext context, DatabaseService dbService) {
-    bool isProcessing = false;
-    bool isSuccess = false;
-    showModalBottomSheet(
-      context: context, backgroundColor: AppTheme.surface, isScrollControlled: true,
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
-      builder: (sheetContext) {
-        return StatefulBuilder(builder: (context, setModalState) {
-          return Padding(
-            padding: EdgeInsets.only(top: 20, left: 20, right: 20, bottom: MediaQuery.of(context).viewInsets.bottom + 20),
-            child: Column(mainAxisSize: MainAxisSize.min, children: [
-              Container(width: 40, height: 4, decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(2))),
-              const SizedBox(height: 20),
-              if (!isProcessing && !isSuccess) ...[
-                const Icon(Icons.security_rounded, color: AppTheme.accent, size: 40), const SizedBox(height: 12),
-                const Text('Secure Checkout Simulator', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16)), const SizedBox(height: 6),
-                const Text('This is a sandboxed payment verification gate designed for Play Store verification testing.', textAlign: TextAlign.center, style: TextStyle(color: AppTheme.textSecondary, fontSize: 11, height: 1.4)), const SizedBox(height: 20),
-                Container(padding: const EdgeInsets.all(16), decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.03), borderRadius: BorderRadius.circular(12), border: Border.all(color: Colors.white.withValues(alpha: 0.06))),
-                    child: const Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-                      Text('StreamVault Pro (Lifetime license)', style: TextStyle(color: Colors.white70, fontSize: 12, fontWeight: FontWeight.bold)),
-                      Text('\$1.99', style: TextStyle(color: AppTheme.accent, fontWeight: FontWeight.bold, fontSize: 13)),
-                    ])),
-                const SizedBox(height: 20),
-                SizedBox(width: double.infinity, child: ElevatedButton.icon(
-                  onPressed: () { setModalState(() => isProcessing = true); Future.delayed(const Duration(seconds: 2), () { if (!sheetContext.mounted) return; setModalState(() { isProcessing = false; isSuccess = true; }); dbService.togglePremium(); }); },
-                  icon: const Icon(Icons.shopping_bag_rounded, size: 16, color: Colors.black), label: const Text('Authorize Sandbox Purchase', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.black)),
-                  style: ElevatedButton.styleFrom(backgroundColor: AppTheme.secondaryAccent, padding: const EdgeInsets.symmetric(vertical: 14), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))),
-                )),
-              ] else if (isProcessing) ...[
-                const SizedBox(height: 40), const CircularProgressIndicator(color: AppTheme.accent), const SizedBox(height: 20),
-                const Text('Authorizing Sandbox Transaction...', style: TextStyle(color: Colors.white70, fontSize: 13, fontWeight: FontWeight.w600)), const SizedBox(height: 40),
-              ] else ...[
-                const Icon(Icons.check_circle_rounded, color: Colors.greenAccent, size: 56), const SizedBox(height: 14),
-                const Text('Transaction Authorized!', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16)), const SizedBox(height: 6),
-                const Text('Premium membership enabled. Watch Ads-free natively.', textAlign: TextAlign.center, style: TextStyle(color: AppTheme.textSecondary, fontSize: 11)), const SizedBox(height: 24),
-                SizedBox(width: double.infinity, child: ElevatedButton(onPressed: () { Navigator.pop(context); _loadMetrics(); }, style: ElevatedButton.styleFrom(backgroundColor: AppTheme.accent, foregroundColor: Colors.black, padding: const EdgeInsets.symmetric(vertical: 12), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))), child: const Text('Return to settings', style: TextStyle(fontWeight: FontWeight.bold)))),
-              ],
-            ]),
-          );
-        });
-      },
-    );
-  }
-
   void _showSubtitleSettings(BuildContext context, DatabaseService dbService) {
     final sizes = [{'label': 'Small (80%)', 'value': 0.8}, {'label': 'Medium (100%)', 'value': 1.0}, {'label': 'Large (130%)', 'value': 1.3}, {'label': 'X-Large (160%)', 'value': 1.6}];
     showModalBottomSheet(
@@ -797,15 +636,3 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 }
 
-class _BenefitChip extends StatelessWidget {
-  final String label;
-  const _BenefitChip(this.label);
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-      decoration: BoxDecoration(color: AppTheme.secondaryAccent.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(20), border: Border.all(color: AppTheme.secondaryAccent.withValues(alpha: 0.2))),
-      child: Text('✓ $label', style: const TextStyle(color: AppTheme.secondaryAccent, fontSize: 10, fontWeight: FontWeight.w600)),
-    );
-  }
-}

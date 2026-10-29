@@ -46,7 +46,7 @@ class _ProfileScreenState extends State<ProfileScreen>
     final moviesWatched = db.watchHistory.length;
     final hoursWatched = db.totalHoursWatched;
     final watchlistCount = db.watchlist.length;
-    final username = db.username.isNotEmpty ? db.username : 'Guest User';
+    final username = db.currentProfile;
     final initial = username.isNotEmpty ? username[0].toUpperCase() : 'G';
 
     final profileColors = {
@@ -116,23 +116,6 @@ class _ProfileScreenState extends State<ProfileScreen>
                                   ),
                                 ),
                               ),
-                              if (db.isPremium)
-                                Positioned(
-                                  bottom: 0,
-                                  right: 0,
-                                  child: Container(
-                                    padding: const EdgeInsets.all(4),
-                                    decoration: const BoxDecoration(
-                                      color: Colors.tealAccent,
-                                      shape: BoxShape.circle,
-                                    ),
-                                    child: const Icon(
-                                      Icons.verified_rounded,
-                                      color: Colors.black,
-                                      size: 18,
-                                    ),
-                                  ),
-                                ),
                             ],
                           ),
                           const SizedBox(height: 14),

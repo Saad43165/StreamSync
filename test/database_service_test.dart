@@ -76,4 +76,24 @@ void main() {
     }
     expect(db.getRating(77, mediaType: 'movie'), 4);
   });
+
+  test('data from the old local sign-in moves into the active profile', () async {
+    SharedPreferences.setMockInitialValues({
+      'streamsync_logged_in': true,
+      'streamsync_username': 'saad',
+      'streamsync_premium': true,
+      'streamsync_auth_user_saad_watchlist': [
+        '{"id": 7, "title": "Old", "media_type": "tv"}',
+      ],
+    });
+    final db = DatabaseService();
+    while (db.isLoading) {
+      await Future<void>.delayed(Duration.zero);
+    }
+    expect(db.isInWatchlist(7, mediaType: 'tv'), isTrue);
+
+    final prefs = await SharedPreferences.getInstance();
+    expect(prefs.containsKey('streamsync_logged_in'), isFalse);
+    expect(prefs.containsKey('streamsync_premium'), isFalse);
+  });
 }
